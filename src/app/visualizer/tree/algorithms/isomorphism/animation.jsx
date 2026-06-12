@@ -1,15 +1,15 @@
 "use client";
-import React, { useState, useEffect, useRef } from "react";
-import { Play, RotateCcw, Info, ArrowLeftRight, RefreshCw } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { Play, Info, RefreshCw } from "lucide-react";
 import {
   VisualizerCard,
   VisualizerInteractiveLayout,
 } from "@/app/visualizer/components/VisualizerInteractiveLayout";
-import usePlayback from "@/app/hooks/usePlayback";
 import useVisualizerKeyboard from "@/app/hooks/useVisualizerKeyboard";
 import PlaybackControls from "@/app/components/ui/PlaybackControls";
 import useVisualizerReset from "@/app/hooks/useVisualizerReset";
 import { generateIsomorphismSteps } from "@/features/algorithms/tree/isomorphismLogic";
+import { useAnimationEngine } from "@/lib/visualizer/useAnimationEngine";
 
 // Tree 1 Setup
 const NODES1 = [
@@ -40,82 +40,72 @@ const EDGES2 = NODES2.filter(n => n.parent).map(n => {
 });
 
 export default function IsomorphismAnimation() {
-  const [animating, setAnimating] = useState(false);
-  const [message, setMessage] = useState("Click 'Check Isomorphism' to compare the two trees step-by-step.");
-  
-  const [steps, setSteps] = useState([]);
-  const [currentStepIdx, setCurrentStepIdx] = useState(-1);
-  const { speed, setSpeed } = usePlayback(1);
-  const timerRef = useRef(null);
+  const [isCalculated, setIsCalculated] = useState(false);
+
+  const frames = useMemo(() => {
+    if (!isCalculated) return [];
+    return generateIsomorphismSteps();
+  }, [isCalculated]);
+
+  const engine = useAnimationEngine({ steps: frames, initialSpeed: 1600 });
+
   useVisualizerReset(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setAnimating(false);
-    setMessage("...");
-    setSteps([]);
-    setCurrentStepIdx(-1);
+    setIsCalculated(false);
+    engine.reset();
   });
 
-  const currentStep = steps[currentStepIdx] || null;
-  const activePairs = currentStep ? currentStep.activePairs : [];
-  const matchStatus = currentStep ? currentStep.matchStatus : {};
-  const isomorphic = currentStep ? currentStep.isomorphicResult : null;
-
-
-  useEffect(() => {
-    if (currentStep) {
-      setMessage(currentStep.message);
-    }
-  }, [currentStep]);
-
-  useEffect(() => {
-    if (!animating || steps.length === 0) return;
-    if (currentStepIdx >= steps.length - 1) { setAnimating(false); return; }
-    timerRef.current = setTimeout(() => setCurrentStepIdx(p => p + 1), 1600 / speed);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [animating, currentStepIdx, steps, speed]);
-
-  const pauseVisualizer = () => { setAnimating(false); if (timerRef.current) clearTimeout(timerRef.current); };
-  const startVisualizer = () => {
-    if (steps.length === 0) return;
-    setAnimating(true);
-    const nextIdx = currentStepIdx === -1 || currentStepIdx >= steps.length - 1 ? 0 : currentStepIdx + 1;
-    setCurrentStepIdx(nextIdx);
-  };
-  const stepForward = () => { setAnimating(false); if (currentStepIdx < steps.length - 1) setCurrentStepIdx(p => p + 1); };
-  const stepBackward = () => { setAnimating(false); if (currentStepIdx > 0) setCurrentStepIdx(p => p - 1); };
-  const resetPlayback = () => {
-    setAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setCurrentStepIdx(-1);
-    setMessage("Playback reset.");
-  };
-
   const handleCheck = () => {
-    setAnimating(false);
-    const newSteps = generateIsomorphismSteps();
-    setSteps(newSteps);
-    setCurrentStepIdx(0);
-    setAnimating(true);
+    setIsCalculated(true);
+    engine.reset();
+    engine.play();
   };
 
   const handleReset = () => {
-    setAnimating(false);
-    setSteps([]);
-    setCurrentStepIdx(-1);
-    setMessage("Click 'Check Isomorphism' to compare the two trees step-by-step.");
+    setIsCalculated(false);
+    engine.reset();
   };
 
+  const togglePlay = () => {
+    if (engine.currentStep === frames.length - 1 && frames.length > 0) {
+      engine.reset();
+    } else if (engine.isPlaying) {
+      engine.pause();
+    } else {
+      engine.play();
+    }
+  };
+
+  useEffect(() => {
+    if (
+      engine.currentStep === frames.length - 1 &&
+      frames.length > 0 &&
+      !engine.isPlaying
+    ) {
+      // Auto pause at the end
+    }
+  }, [engine.currentStep, frames, engine.isPlaying, engine]);
+
   useVisualizerKeyboard({
-    onStepForward: stepForward,
-    onStepBackward: stepBackward,
-    onTogglePlay: animating ? pauseVisualizer : startVisualizer,
-    onReset: resetPlayback,
-    onSpeedChange: setSpeed,
-    speed: speed,
-    sorting: animating,
+    onStepForward: engine.stepForward,
+    onStepBackward: engine.stepBackward,
+    onTogglePlay: togglePlay,
+    onReset: handleReset,
+    onSpeedChange: (s) => engine.setSpeed(s * 1000),
+    speed: engine.speed / 1000,
+    sorting: engine.isPlaying,
     sorted: false,
     enabled: true,
   });
+
+  const currentStep =
+    frames.length > 0 && engine.currentStep >= 0
+      ? frames[engine.currentStep]
+      : null;
+
+  const activePairs = currentStep ? currentStep.activePairs : [];
+  const matchStatus = currentStep ? currentStep.matchStatus : {};
+  const isomorphic = currentStep ? currentStep.isomorphicResult : null;
+  const message = currentStep ? currentStep.message : "Click 'Check Isomorphism' to compare the two trees step-by-step.";
 
   return (
     <VisualizerInteractiveLayout>
@@ -128,7 +118,7 @@ export default function IsomorphismAnimation() {
           <div className="flex items-center gap-3">
             <button 
               onClick={handleCheck} 
-              disabled={animating}
+              disabled={engine.isPlaying || isCalculated}
               className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold bg-[#a435f0] hover:bg-[#8f2cd6] disabled:opacity-50 text-white rounded-xl transition-all shadow-md"
             >
               <Play className="w-4 h-4 fill-white" /> Check Isomorphism
@@ -143,14 +133,14 @@ export default function IsomorphismAnimation() {
         </div>
 
         <PlaybackControls 
-          isPlaying={animating}
-          onPlayPause={animating ? pauseVisualizer : startVisualizer}
-          onStepForward={stepForward}
-          onStepBackward={stepBackward}
-          onReset={resetPlayback}
-          speed={speed}
-          onSpeedChange={setSpeed}
-          disabled={steps.length === 0}
+          isPlaying={engine.isPlaying}
+          onPlayPause={togglePlay}
+          onStepForward={engine.stepForward}
+          onStepBackward={engine.stepBackward}
+          onReset={() => { engine.reset(); }}
+          speed={engine.speed / 1000}
+          onSpeedChange={(s) => engine.setSpeed(s * 1000)}
+          disabled={frames.length === 0}
           showPlayPause={true}
         />
       </VisualizerCard>
@@ -159,7 +149,7 @@ export default function IsomorphismAnimation() {
         className={
           isomorphic !== null
             ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30"
-            : animating
+            : engine.isPlaying
                 ? "border-[#a435f0]/30 bg-[#a435f0]/10 dark:border-[#a435f0]/50 dark:bg-[#a435f0]/20"
                 : ""
         }
@@ -167,7 +157,7 @@ export default function IsomorphismAnimation() {
         <div className="flex items-center text-xs text-gray-500 font-semibold gap-1.5 mb-2">
           <Info className="w-4 h-4 text-[#a435f0]" /> Animation Status
           <span className="ml-auto font-bold bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-gray-600 dark:text-gray-400">
-            Step {currentStepIdx !== -1 ? currentStepIdx + 1 : 0} / {steps.length || 0}
+            Step {engine.currentStep !== -1 ? engine.currentStep + 1 : 0} / {frames.length || 0}
           </span>
         </div>
         <div className="text-lg font-medium min-h-[28px]">{message}</div>

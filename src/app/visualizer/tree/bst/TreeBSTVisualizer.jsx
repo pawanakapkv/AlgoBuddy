@@ -1,13 +1,16 @@
 "use client";
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Footer from "@/app/components/footer";
-import usePlayback from "@/app/hooks/usePlayback";
 import PlaybackControls from "@/app/components/ui/PlaybackControls";
 import Breadcrumbs from "@/app/components/ui/Breadcrumbs";
 import { createVisualizerPaths } from "@/app/visualizer/components/VisualizerPageLayout";
 import { generateDeleteSteps } from "@/features/algorithms/tree/bstDeleteLogic";
 import { generateInOrderSteps } from "@/features/algorithms/tree/bstInOrderLogic";
 import { generatePreOrderSteps } from "@/features/algorithms/tree/bstPreOrderLogic";
+import { generatePostOrderSteps } from "@/features/algorithms/tree/bstPostOrderLogic";
+import { generateSearchSteps } from "@/features/algorithms/tree/bstSearchLogic";
+import { generateInsertSteps } from "@/features/algorithms/tree/bstInsertLogic";
+import { useAnimationEngine } from "@/lib/visualizer/useAnimationEngine";
 import { CustomInputPanel } from "@/app/visualizer/components/CustomInputPanel";
 import {
   Info,
@@ -269,29 +272,53 @@ export default function TreeBSTVisualizer({ initialMode }) {
   const [inputValue, setInputValue] = useState("");
   const [activeOperationValue, setActiveOperationValue] = useState(null);
   const [steps, setSteps] = useState([]);
-  const [currentStepIdx, setCurrentStepIdx] = useState(-1);
-  const [isAnimating, setIsAnimating] = useState(false);
   const [message, setMessage] = useState("Add nodes or select a mode to begin.");
   const [quizIdx, setQuizIdx] = useState(0);
   const [selectedOption, setSelectedOption] = useState(null);
   const [quizSubmitted, setQuizSubmitted] = useState(false);
 
-  const { speed, setSpeed } = usePlayback(1);
-  const timerRef = useRef(null);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const baseSpeedMs = 1800;
+
+  const onStep = useCallback(
+    (step, idx) => {
+      if (!step) return;
+      setMessage(step.explanation);
+      if (idx === steps.length - 1) {
+        if (mode === "insertion" || mode === "deletion") {
+          setRoot(targetTreeRoot);
+          setMessage("Operation completed successfully!");
+        }
+      }
+    },
+    [mode, steps, targetTreeRoot]
+  );
+
+  const engine = useAnimationEngine({
+    steps,
+    onStep,
+    initialSpeed: baseSpeedMs,
+  });
+
+  const currentStepIdx = steps.length > 0 ? engine.currentStep : -1;
+  const isAnimating = engine.isPlaying;
 
   const resetPlayback = useCallback(() => {
-    setIsAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setCurrentStepIdx(-1);
+    engine.reset();
     setSteps([]);
     setMessage("Playback reset. Click Start to begin operations.");
-  }, []);
+  }, [engine]);
 
   // Sync mode changes
   useEffect(() => {
     setMode(initialMode);
     resetPlayback();
   }, [initialMode, resetPlayback]);
+
+  // Sync speed changes from UI to engine delay
+  useEffect(() => {
+    engine.setSpeed(baseSpeedMs / playbackRate);
+  }, [playbackRate, engine]);
 
   const handleInsert = (customValue) => {
     const val = customValue !== undefined ? customValue : parseInt(inputValue);
@@ -312,8 +339,7 @@ export default function TreeBSTVisualizer({ initialMode }) {
       setTargetTreeRoot(newRoot);
       const preCalculated = generateInsertSteps(root, val);
       setSteps(preCalculated);
-      setCurrentStepIdx(0);
-      setIsAnimating(true);
+      setTimeout(() => engine.play(), 0);
       setInputValue("");
     } else {
       setRoot(prev => insertNodeFunctional(prev, val));
@@ -337,8 +363,7 @@ export default function TreeBSTVisualizer({ initialMode }) {
     setActiveOperationValue(val);
     const preCalculated = generateSearchSteps(root, val);
     setSteps(preCalculated);
-    setCurrentStepIdx(0);
-    setIsAnimating(true);
+    setTimeout(() => engine.play(), 0);
     setInputValue("");
   };
 
@@ -364,8 +389,7 @@ export default function TreeBSTVisualizer({ initialMode }) {
     setTargetTreeRoot(newRoot);
     const preCalculated = generateDeleteSteps(root, val);
     setSteps(preCalculated);
-    setCurrentStepIdx(0);
-    setIsAnimating(true);
+    setTimeout(() => engine.play(), 0);
     setInputValue("");
   };
 
@@ -448,10 +472,12 @@ export default function TreeBSTVisualizer({ initialMode }) {
           return;
         }
         setSteps(preCalculated);
-        setCurrentStepIdx(0);
-        setIsAnimating(true);
-        return;
       }
+      setQuizSubmitted(false);
+      setSelectedOption(null);
+      if (engine.currentStep >= (steps.length || 0) - 1) engine.reset();
+      setTimeout(() => engine.play(), 0);
+      return;
     }
 
     if (mode === "searching" || mode === "deletion") {
@@ -470,65 +496,26 @@ export default function TreeBSTVisualizer({ initialMode }) {
       return;
     }
 
-    setIsAnimating(true);
     setQuizSubmitted(false);
     setSelectedOption(null);
 
-    let nextIdx = currentStepIdx === -1 || currentStepIdx >= steps.length - 1 ? 0 : currentStepIdx + 1;
-    setCurrentStepIdx(nextIdx);
+    if (engine.currentStep >= steps.length - 1) engine.reset();
+    setTimeout(() => engine.play(), 0);
   };
 
-  useEffect(() => {
-    if (!isAnimating || steps.length === 0) return;
-
-    if (currentStepIdx >= steps.length) {
-      setIsAnimating(false);
-      return;
-    }
-
-    const currentStep = steps[currentStepIdx];
-    setMessage(currentStep.explanation);
-
-    timerRef.current = setTimeout(() => {
-      if (currentStepIdx < steps.length - 1) {
-        setCurrentStepIdx(prev => prev + 1);
-      } else {
-        setIsAnimating(false);
-        // Permanently write to tree state if write operation completed successfully
-        if (mode === "insertion" || mode === "deletion") {
-          setRoot(targetTreeRoot);
-          setMessage("Operation completed successfully!");
-        } else {
-          setMessage(currentStep.explanation);
-        }
-      }
-    }, 1800 / speed);
-
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [isAnimating, currentStepIdx, steps, speed, targetTreeRoot, mode]);
-
   const pauseVisualizer = () => {
-    setIsAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
+    engine.pause();
   };
 
   const stepForward = () => {
-    setIsAnimating(false);
-    if (currentStepIdx < steps.length - 1) {
-      setCurrentStepIdx(prev => prev + 1);
-      if (currentStepIdx === steps.length - 2 && (mode === "insertion" || mode === "deletion")) {
-        setRoot(targetTreeRoot);
-      }
+    engine.stepForward();
+    if (engine.currentStep === steps.length - 2 && (mode === "insertion" || mode === "deletion")) {
+      setRoot(targetTreeRoot);
     }
   };
 
   const stepBackward = () => {
-    setIsAnimating(false);
-    if (currentStepIdx > 0) {
-      setCurrentStepIdx(prev => prev - 1);
-    }
+    engine.stepBackward();
   };
 
   const handleResetTree = () => {
@@ -641,9 +628,6 @@ export default function TreeBSTVisualizer({ initialMode }) {
   useEffect(() => {
     // Populate default beautiful tree on mount
     generateRandomTree();
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
   }, [generateRandomTree]);
 
   const currentStep = steps[currentStepIdx] || null;
@@ -741,8 +725,8 @@ export default function TreeBSTVisualizer({ initialMode }) {
                 onReset={resetPlayback}
                 onClear={handleResetTree}
                 clearLabel="Clear Tree"
-                speed={speed}
-                onSpeedChange={setSpeed}
+                speed={playbackRate}
+                onSpeedChange={setPlaybackRate}
                 disabled={steps.length === 0 && !isAnimating}
                 showPlayPause={true}
                 progressText={`Step ${currentStepIdx !== -1 ? currentStepIdx + 1 : 0} / ${steps.length || 0}`}

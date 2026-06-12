@@ -1,9 +1,9 @@
 "use client";
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import Footer from "@/app/components/footer";
-import usePlayback from "@/app/hooks/usePlayback";
 import PlaybackControls from "@/app/components/ui/PlaybackControls";
 import Breadcrumbs from "@/app/components/ui/Breadcrumbs";
+import { useAnimationEngine } from "@/lib/visualizer/useAnimationEngine";
 import { createVisualizerPaths } from "@/app/visualizer/components/VisualizerPageLayout";
 import { insertAVL, deleteAVL } from "./avlUtils";
 import { Info, Layers, AlertCircle } from "lucide-react";
@@ -62,19 +62,41 @@ export default function TreeAVLVisualizer({ initialMode = "avl" }) {
   const [targetTreeRoot, setTargetTreeRoot] = useState(null);
   const [inputValue, setInputValue] = useState("");
   const [steps, setSteps] = useState([]);
-  const [currentStepIdx, setCurrentStepIdx] = useState(-1);
-  const [isAnimating, setIsAnimating] = useState(false);
   const [message, setMessage] = useState("Insert nodes to build an AVL tree.");
   const [operationLabel, setOperationLabel] = useState(mode.toUpperCase());
-  const timerRef = useRef(null);
-  const { speed, setSpeed } = usePlayback(1);
+
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const baseSpeedMs = 1800;
+
+  const onStep = useCallback(
+    (step, idx) => {
+      if (!step) return;
+      setMessage(step.explanation);
+      if (idx === steps.length - 1 && targetTreeRoot) {
+        setRoot(targetTreeRoot);
+        setMessage("Operation completed successfully!");
+      }
+    },
+    [steps.length, targetTreeRoot]
+  );
+
+  const engine = useAnimationEngine({
+    steps,
+    onStep,
+    initialSpeed: baseSpeedMs,
+  });
+
+  const currentStepIdx = steps.length > 0 ? engine.currentStep : -1;
+  const isAnimating = engine.isPlaying;
 
   const resetPlayback = useCallback(() => {
-    setIsAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
+    engine.reset();
     setSteps([]);
-    setCurrentStepIdx(-1);
-  }, []);
+  }, [engine]);
+
+  useEffect(() => {
+    engine.setSpeed(baseSpeedMs / playbackRate);
+  }, [playbackRate, engine]);
 
   const clearTree = useCallback(() => {
     resetPlayback();
@@ -109,10 +131,9 @@ export default function TreeAVLVisualizer({ initialMode = "avl" }) {
 
     setTargetTreeRoot(nextRoot);
     setSteps(nextSteps);
-    setCurrentStepIdx(0);
-    setIsAnimating(true);
     setOperationLabel(label);
-  }, []);
+    setTimeout(() => engine.play(), 0);
+  }, [engine]);
 
   const handleInsert = useCallback(() => {
     const value = parseInt(inputValue, 10);
@@ -154,64 +175,32 @@ export default function TreeAVLVisualizer({ initialMode = "avl" }) {
       setMessage("Insert or delete a value first to generate an animation.");
       return;
     }
-    setIsAnimating(true);
-    if (currentStepIdx === -1) setCurrentStepIdx(0);
-  }, [currentStepIdx, steps.length]);
+    if (engine.currentStep >= steps.length - 1) {
+      engine.reset();
+    }
+    setTimeout(() => engine.play(), 0);
+  }, [engine, steps.length]);
 
   const pauseVisualizer = useCallback(() => {
-    setIsAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-  }, []);
+    engine.pause();
+  }, [engine]);
 
   const stepForward = useCallback(() => {
-    setIsAnimating(false);
-    if (currentStepIdx < steps.length - 1) {
-      setCurrentStepIdx((prev) => prev + 1);
+    engine.stepForward();
+    if (engine.currentStep === steps.length - 2 && targetTreeRoot) {
+      setRoot(targetTreeRoot);
     }
-  }, [currentStepIdx, steps.length]);
+  }, [engine, steps.length, targetTreeRoot]);
 
   const stepBackward = useCallback(() => {
-    setIsAnimating(false);
-    if (currentStepIdx > 0) {
-      setCurrentStepIdx((prev) => prev - 1);
-    }
-  }, [currentStepIdx]);
+    engine.stepBackward();
+  }, [engine]);
 
   const handleResetPlayback = useCallback(() => {
-    setIsAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setCurrentStepIdx(-1);
+    engine.reset();
     setSteps([]);
     setMessage("Playback reset.");
-  }, []);
-
-  useEffect(() => {
-    if (!isAnimating || steps.length === 0) return;
-
-    if (currentStepIdx >= steps.length) {
-      setIsAnimating(false);
-      return;
-    }
-
-    const currentStep = steps[currentStepIdx];
-    setMessage(currentStep.explanation);
-
-    timerRef.current = setTimeout(() => {
-      if (currentStepIdx < steps.length - 1) {
-        setCurrentStepIdx((prev) => prev + 1);
-      } else {
-        setIsAnimating(false);
-        if (targetTreeRoot) {
-          setRoot(targetTreeRoot);
-        }
-        setMessage("Operation completed successfully!");
-      }
-    }, 1800 / speed);
-
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [currentStepIdx, isAnimating, speed, steps, targetTreeRoot]);
+  }, [engine]);
 
   const currentStep = steps[currentStepIdx] || null;
 
@@ -348,8 +337,8 @@ export default function TreeAVLVisualizer({ initialMode = "avl" }) {
             onReset={handleResetPlayback}
             onClear={clearTree}
             clearLabel="Clear Tree"
-            speed={speed}
-            onSpeedChange={setSpeed}
+            speed={playbackRate}
+            onSpeedChange={setPlaybackRate}
             disabled={steps.length === 0 && !isAnimating}
             showPlayPause={true}
             progressText={`Step ${currentStepIdx !== -1 ? currentStepIdx + 1 : 0} / ${steps.length || 0}`}
