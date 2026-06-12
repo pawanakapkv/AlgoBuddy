@@ -1,14 +1,14 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   VisualizerCard,
   VisualizerInteractiveLayout,
 } from "@/app/visualizer/components/VisualizerInteractiveLayout";
-import usePlayback from "@/app/hooks/usePlayback";
 import useVisualizerKeyboard from "@/app/hooks/useVisualizerKeyboard";
 import PlaybackControls from "@/app/components/ui/PlaybackControls";
 import useVisualizerReset from "@/app/hooks/useVisualizerReset";
+import { useAnimationEngine } from "@/lib/visualizer/useAnimationEngine";
 
 class TreeNode {
   constructor(value) {
@@ -21,23 +21,7 @@ class TreeNode {
 export default function InOrderVisualizer() {
   const [root, setRoot] = useState(null);
   const [inputValue, setInputValue] = useState("");
-  const [message, setMessage] = useState("Tree is empty");
-  const [isAnimating, setIsAnimating] = useState(false);
-  const [highlightedNodes, setHighlightedNodes] = useState([]);
-  const [traversalResult, setTraversalResult] = useState([]);
-  const [steps, setSteps] = useState(0);
-  const animationRef = useRef(null);
-  useVisualizerReset(() => {
-    if (animationRef.current) clearTimeout(animationRef.current);
-    setRoot(null);
-    setInputValue("");
-    setMessage("Tree is empty");
-    setIsAnimating(false);
-    setHighlightedNodes([]);
-    setTraversalResult([]);
-    setSteps(0);
-  });
-  const { speed, setSpeed } = usePlayback(1);
+  const [isCalculated, setIsCalculated] = useState(false);
 
   const insertNode = (node, value) => {
     if (!node) return new TreeNode(value);
@@ -53,19 +37,12 @@ export default function InOrderVisualizer() {
   const handleInsert = () => {
     const value = parseInt(inputValue, 10);
     if (Number.isNaN(value)) {
-      setMessage("Please enter a valid number");
+      alert("Please enter a valid number");
       return;
     }
-
-    setRoot((prev) => {
-      const newRoot = insertNode(prev, value);
-      setMessage(`Inserted ${value}`);
-      return newRoot;
-    });
+    setRoot((prev) => insertNode(prev, value));
     setInputValue("");
-    setTraversalResult([]);
-    setHighlightedNodes([]);
-    setSteps(0);
+    setIsCalculated(false);
   };
 
   const generateRandomTree = () => {
@@ -78,28 +55,11 @@ export default function InOrderVisualizer() {
     });
 
     setRoot(newRoot);
-    setMessage(`Generated tree with ${size} nodes`);
-    setTraversalResult([]);
-    setHighlightedNodes([]);
-    setSteps(0);
-  };
-
-  const reset = () => {
-    if (animationRef.current) {
-      clearTimeout(animationRef.current);
-    }
-    setRoot(null);
-    setInputValue("");
-    setIsAnimating(false);
-    setMessage("Tree is empty");
-    setTraversalResult([]);
-    setHighlightedNodes([]);
-    setSteps(0);
+    setIsCalculated(false);
   };
 
   const inOrderTraversal = (node, path = []) => {
     if (!node) return path;
-
     const leftPath = inOrderTraversal(node.left, path);
     leftPath.push({
       value: node.value,
@@ -109,46 +69,50 @@ export default function InOrderVisualizer() {
     return inOrderTraversal(node.right, leftPath);
   };
 
+  const frames = useMemo(() => {
+    if (!isCalculated || !root) return [];
+    return inOrderTraversal(root);
+  }, [isCalculated, root]);
+
+  const engine = useAnimationEngine({ steps: frames, initialSpeed: 1000 });
+
+  const reset = () => {
+    setRoot(null);
+    setInputValue("");
+    setIsCalculated(false);
+    engine.reset();
+  };
+
+  useVisualizerReset(reset);
+
   const visualizeInOrder = () => {
     if (!root) {
-      setMessage("Tree is empty!");
+      alert("Tree is empty!");
       return;
     }
+    setIsCalculated(true);
+    engine.reset();
+    engine.play();
+  };
 
-    setIsAnimating(true);
-    setMessage("Performing in-order traversal...");
-    setTraversalResult([]);
-    setHighlightedNodes([]);
-    setSteps(0);
-
-    const traversalPath = inOrderTraversal(root);
-    let step = 0;
-
-    const animateStep = () => {
-      if (step < traversalPath.length) {
-        const current = traversalPath[step];
-        setHighlightedNodes([current.value]);
-        setTraversalResult((prev) => [...prev, current.value]);
-        setSteps(step + 1);
-        step++;
-        animationRef.current = setTimeout(animateStep, 1000 / speed);
-      } else {
-        setMessage(
-          `In-order traversal complete: [${traversalPath.map((node) => node.value).join(", ")}]`
-        );
-        setIsAnimating(false);
-        setHighlightedNodes([]);
-      }
-    };
-
-    animateStep();
+  const togglePlay = () => {
+    if (engine.currentStep === frames.length - 1 && frames.length > 0) {
+      engine.reset();
+    } else if (engine.isPlaying) {
+      engine.pause();
+    } else {
+      engine.play();
+    }
   };
 
   useVisualizerKeyboard({
+    onStepForward: engine.stepForward,
+    onStepBackward: engine.stepBackward,
+    onTogglePlay: togglePlay,
     onReset: reset,
-    onSpeedChange: setSpeed,
-    speed: speed,
-    sorting: isAnimating,
+    onSpeedChange: (s) => engine.setSpeed(s * 1000),
+    speed: engine.speed / 1000,
+    sorting: engine.isPlaying,
     sorted: false,
     enabled: true,
   });
@@ -160,11 +124,18 @@ export default function InOrderVisualizer() {
     const xOffset = Math.max(50, 200 / (level + 1));
     const yOffset = 80;
 
+    // Check if node is highlighted in current or previous frames
+    let highlighted = false;
+    if (isCalculated && engine.currentStep >= 0) {
+        // If this node was visited at or before the current step
+        highlighted = frames.slice(0, engine.currentStep + 1).some(f => f.value === node.value);
+    }
+
     nodes.push({
       value: node.value,
       x,
       y,
-      highlighted: highlightedNodes.includes(node.value),
+      highlighted,
     });
 
     if (node.left) {
@@ -210,14 +181,14 @@ export default function InOrderVisualizer() {
   };
 
   const svgDimensions = getSvgDimensions();
+  const currentTraversalResult = frames.slice(0, engine.currentStep + 1).map(f => f.value);
 
-  useEffect(() => {
-    return () => {
-      if (animationRef.current) {
-        clearTimeout(animationRef.current);
-      }
-    };
-  }, []);
+  const getMessage = () => {
+    if (!root) return "Tree is empty";
+    if (!isCalculated) return `Ready to traverse tree with ${nodes.length} nodes`;
+    if (engine.currentStep === frames.length - 1) return `In-order traversal complete: [${frames.map((node) => node.value).join(", ")}]`;
+    return "Performing in-order traversal...";
+  };
 
   return (
     <VisualizerInteractiveLayout>
@@ -226,7 +197,7 @@ export default function InOrderVisualizer() {
           <div>
             <button
               onClick={generateRandomTree}
-              disabled={isAnimating}
+              disabled={engine.isPlaying}
               className="mb-2 w-full rounded-lg bg-[#a435f0] px-4 py-2 text-white transition-colors hover:bg-[#8f2cd6] disabled:opacity-50"
             >
               Generate Random Tree
@@ -238,12 +209,12 @@ export default function InOrderVisualizer() {
                 onChange={(e) => setInputValue(e.target.value)}
                 placeholder="Enter number"
                 className="flex-1 rounded-lg border p-2 transition-all focus:border-transparent focus:ring-2 focus:ring-[#a435f0] dark:bg-gray-700"
-                disabled={isAnimating}
+                disabled={engine.isPlaying}
                 onKeyDown={(e) => e.key === "Enter" && handleInsert()}
               />
               <button
                 onClick={handleInsert}
-                disabled={isAnimating}
+                disabled={engine.isPlaying}
                 className="rounded-lg bg-[#a435f0] px-4 py-2 text-white transition-colors hover:bg-[#8f2cd6] disabled:opacity-50"
               >
                 Insert
@@ -253,10 +224,10 @@ export default function InOrderVisualizer() {
           <div className="flex flex-col gap-2">
             <button
               onClick={visualizeInOrder}
-              disabled={!root || isAnimating}
+              disabled={!root || engine.isPlaying || isCalculated}
               className="w-full rounded-lg bg-[#a435f0] px-4 py-2 text-white transition-colors hover:bg-[#8f2cd6] disabled:opacity-50"
             >
-              {isAnimating ? "Traversing..." : "Start Traversal"}
+              Start Traversal
             </button>
             <button
               onClick={reset}
@@ -267,13 +238,22 @@ export default function InOrderVisualizer() {
           </div>
         </div>
 
+        {frames.length > 0 && (
+          <div className="mt-6">
+            <PlaybackControls 
+              isPlaying={engine.isPlaying}
+              onPlayPause={togglePlay}
+              onStepForward={engine.stepForward}
+              onStepBackward={engine.stepBackward}
+              onReset={() => { engine.reset(); }}
+              speed={engine.speed / 1000}
+              onSpeedChange={(s) => engine.setSpeed(s * 1000)}
+              disabled={frames.length === 0}
+              showPlayPause={true}
+            />
+          </div>
+        )}
         <div className="mt-6 flex flex-col gap-4">
-          <PlaybackControls 
-            showPlayPause={false}
-            speed={speed}
-            onSpeedChange={setSpeed}
-            disabled={isAnimating}
-          />
           <div className="flex gap-4">
             <div className="flex-1 rounded-lg bg-gray-100 p-2 text-center dark:bg-gray-700">
               <div className="text-xs text-gray-500 dark:text-gray-400">Nodes</div>
@@ -281,7 +261,7 @@ export default function InOrderVisualizer() {
             </div>
             <div className="flex-1 rounded-lg bg-gray-100 p-2 text-center dark:bg-gray-700">
               <div className="text-xs text-gray-500 dark:text-gray-400">Steps</div>
-              <div className="font-bold">{steps}</div>
+              <div className="font-bold">{engine.currentStep + 1} / {frames.length}</div>
             </div>
           </div>
         </div>
@@ -289,14 +269,14 @@ export default function InOrderVisualizer() {
 
       <VisualizerCard
         className={
-          message.includes("complete")
+          engine.currentStep === frames.length - 1 && frames.length > 0
             ? "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30"
-            : isAnimating
+            : engine.isPlaying
               ? "border-[#a435f0]/30 bg-[#a435f0]/10 dark:border-[#a435f0]/50 dark:bg-[#a435f0]/20"
               : ""
         }
       >
-        <p className="text-center font-medium">{message}</p>
+        <p className="text-center font-medium">{getMessage()}</p>
       </VisualizerCard>
 
       <VisualizerCard>
@@ -322,43 +302,47 @@ export default function InOrderVisualizer() {
                     className="dark:stroke-gray-600"
                   />
                 ))}
-                {nodes.map((node, i) => (
-                  <g key={i}>
-                    <circle
-                      cx={node.x}
-                      cy={node.y}
-                      r="22"
-                      fill={node.highlighted ? "#a435f0" : "#d38cff"}
-                      stroke={node.highlighted ? "#8710d8" : "#a435f0"}
-                      strokeWidth="2"
-                      className={`transition-colors ${node.highlighted ? "animate-pulse" : ""}`}
-                    />
-                    <text
-                      x={node.x}
-                      y={node.y + 5}
-                      textAnchor="middle"
-                      fill={node.highlighted ? "white" : "black"}
-                      fontSize="13"
-                      fontWeight="600"
-                    >
-                      {node.value}
-                    </text>
-                  </g>
-                ))}
+                {nodes.map((node, i) => {
+                  const isCurrentTarget = isCalculated && engine.currentStep >= 0 && frames[engine.currentStep].value === node.value;
+                  return (
+                    <g key={i}>
+                      {isCurrentTarget && <circle cx={node.x} cy={node.y} r="30" fill="none" stroke="#fcd34d" strokeWidth="2" strokeDasharray="4,2" className="animate-spin-slow opacity-80" />}
+                      <circle
+                        cx={node.x}
+                        cy={node.y}
+                        r="22"
+                        fill={node.highlighted ? "#a435f0" : "#d38cff"}
+                        stroke={node.highlighted ? "#8710d8" : "#a435f0"}
+                        strokeWidth="2"
+                        className={`transition-colors ${isCurrentTarget ? "animate-pulse shadow-lg scale-110 shadow-[#a435f0]" : ""}`}
+                      />
+                      <text
+                        x={node.x}
+                        y={node.y + 5}
+                        textAnchor="middle"
+                        fill={node.highlighted ? "white" : "black"}
+                        fontSize="13"
+                        fontWeight="600"
+                      >
+                        {node.value}
+                      </text>
+                    </g>
+                  );
+                })}
               </svg>
             </div>
           ) : (
             <div className="flex h-full w-full items-center justify-center rounded-lg border-2 border-dashed text-gray-500 dark:border-gray-700 dark:text-gray-400">
-              {isAnimating ? "Traversing..." : "No tree generated yet"}
+              {engine.isPlaying ? "Traversing..." : "No tree generated yet"}
             </div>
           )}
         </div>
 
-        {traversalResult.length > 0 && (
+        {currentTraversalResult.length > 0 && (
           <div className="mt-4 rounded-lg border border-[#a435f0]/30 bg-[#a435f0]/10 p-3 text-center dark:border-[#a435f0]/50 dark:bg-[#a435f0]/20">
             <span className="font-medium">Path: </span>
             <span className="text-[#a435f0] dark:text-[#d38cff] font-bold">
-              [{traversalResult.join(", ")}]
+              [{currentTraversalResult.join(", ")}]
             </span>
           </div>
         )}

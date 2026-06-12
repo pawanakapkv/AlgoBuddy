@@ -1,15 +1,15 @@
 "use client";
-import React, { useState, useEffect, useRef } from "react";
-import { Play, RotateCcw, Info, FileDown, FileUp, RefreshCw } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { FileDown, FileUp, Info, RefreshCw } from "lucide-react";
 import {
   VisualizerCard,
   VisualizerInteractiveLayout,
 } from "@/app/visualizer/components/VisualizerInteractiveLayout";
-import usePlayback from "@/app/hooks/usePlayback";
 import useVisualizerKeyboard from "@/app/hooks/useVisualizerKeyboard";
 import PlaybackControls from "@/app/components/ui/PlaybackControls";
 import useVisualizerReset from "@/app/hooks/useVisualizerReset";
 import { generateSerializationSteps, generateDeserializationSteps } from "@/features/algorithms/tree/serializationLogic";
+import { useAnimationEngine } from "@/lib/visualizer/useAnimationEngine";
 
 const NODES = [
   { id: "1", val: "1", x: 400, y: 60, parent: null },
@@ -39,96 +39,73 @@ const SEQUENCE = [
 ];
 
 export default function SerializationAnimation() {
-  const [animating, setAnimating] = useState(false);
   const [mode, setMode] = useState("idle"); 
-  const [message, setMessage] = useState("Click 'Serialize' to start flattening the tree into a string.");
-  
-  const [steps, setSteps] = useState([]);
-  const [currentStepIdx, setCurrentStepIdx] = useState(-1);
-  const { speed, setSpeed } = usePlayback(1);
-  const timerRef = useRef(null);
+
+  const frames = useMemo(() => {
+    if (mode === "idle") return [];
+    if (mode === "serializing") {
+        return generateSerializationSteps(SEQUENCE);
+    } else {
+        return generateDeserializationSteps(SEQUENCE);
+    }
+  }, [mode]);
+
+  const engine = useAnimationEngine({ steps: frames, initialSpeed: 1600 });
+
   useVisualizerReset(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setAnimating(false);
     setMode("idle");
-    setMessage("...");
-    setSteps([]);
-    setCurrentStepIdx(-1);
+    engine.reset();
   });
 
-  const currentStep = steps[currentStepIdx] || null;
+  const handleSerialize = () => {
+    setMode("serializing");
+    engine.reset();
+    engine.play();
+  };
+
+  const handleDeserialize = () => {
+    setMode("deserializing");
+    engine.reset();
+    engine.play();
+  };
+
+  const handleReset = () => {
+    setMode("idle");
+    engine.reset();
+  };
+
+  const togglePlay = () => {
+    if (engine.currentStep === frames.length - 1 && frames.length > 0) {
+      engine.reset();
+    } else if (engine.isPlaying) {
+      engine.pause();
+    } else {
+      engine.play();
+    }
+  };
+
+  useVisualizerKeyboard({
+    onStepForward: engine.stepForward,
+    onStepBackward: engine.stepBackward,
+    onTogglePlay: togglePlay,
+    onReset: handleReset,
+    onSpeedChange: (s) => engine.setSpeed(s * 1000),
+    speed: engine.speed / 1000,
+    sorting: engine.isPlaying,
+    sorted: false,
+    enabled: true,
+  });
+
+  const currentStep =
+    frames.length > 0 && engine.currentStep >= 0
+      ? frames[engine.currentStep]
+      : null;
+
   const activeStep = currentStep ? currentStep.activeStep : -1;
   const serializedArray = currentStep ? currentStep.serializedArray : (mode === "deserializing" ? SEQUENCE.map(s => s.val || "N") : []);
   const builtNodes = currentStep ? currentStep.builtNodes : [];
   const builtEdges = currentStep ? currentStep.builtEdges : [];
-
-
-  useEffect(() => {
-    if (currentStep) {
-      setMessage(currentStep.message);
-    }
-  }, [currentStep]);
-
-  useEffect(() => {
-    if (!animating || steps.length === 0) return;
-    if (currentStepIdx >= steps.length - 1) { setAnimating(false); return; }
-    timerRef.current = setTimeout(() => setCurrentStepIdx(p => p + 1), 1600 / speed);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [animating, currentStepIdx, steps, speed]);
-
-  const pauseVisualizer = () => { setAnimating(false); if (timerRef.current) clearTimeout(timerRef.current); };
-  const startVisualizer = () => {
-    if (steps.length === 0) return;
-    setAnimating(true);
-    const nextIdx = currentStepIdx === -1 || currentStepIdx >= steps.length - 1 ? 0 : currentStepIdx + 1;
-    setCurrentStepIdx(nextIdx);
-  };
-  const stepForward = () => { setAnimating(false); if (currentStepIdx < steps.length - 1) setCurrentStepIdx(p => p + 1); };
-  const stepBackward = () => { setAnimating(false); if (currentStepIdx > 0) setCurrentStepIdx(p => p - 1); };
-  const resetPlayback = () => {
-    setAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setCurrentStepIdx(-1);
-    setMessage("Playback reset.");
-  };
-
-  const handleSerialize = () => {
-    setAnimating(false);
-    setMode("serializing");
-    const newSteps = generateSerializationSteps(SEQUENCE);
-    setSteps(newSteps);
-    setCurrentStepIdx(0);
-    setAnimating(true);
-  };
-
-  const handleDeserialize = () => {
-    setAnimating(false);
-    setMode("deserializing");
-    const newSteps = generateDeserializationSteps(SEQUENCE);
-    setSteps(newSteps);
-    setCurrentStepIdx(0);
-    setAnimating(true);
-  };
-
-  const handleReset = () => {
-    setAnimating(false);
-    setMode("idle");
-    setSteps([]);
-    setCurrentStepIdx(-1);
-    setMessage("Click 'Serialize' to start flattening the tree into a string.");
-  };
-
-  useVisualizerKeyboard({
-    onStepForward: stepForward,
-    onStepBackward: stepBackward,
-    onTogglePlay: animating ? pauseVisualizer : startVisualizer,
-    onReset: resetPlayback,
-    onSpeedChange: setSpeed,
-    speed: speed,
-    sorting: animating,
-    sorted: false,
-    enabled: true,
-  });
+  const message = currentStep ? currentStep.message : "Click 'Serialize' to start flattening the tree into a string.";
 
   return (
     <VisualizerInteractiveLayout>
@@ -138,7 +115,7 @@ export default function SerializationAnimation() {
             <div className="flex items-center gap-3">
               <button 
                 onClick={handleSerialize} 
-                disabled={animating || mode === "serializing" || serializedArray.length === SEQUENCE.length}
+                disabled={engine.isPlaying || mode === "serializing" || serializedArray.length === SEQUENCE.length}
                 className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold bg-[#a435f0] hover:bg-[#8f2cd6] disabled:opacity-50 text-white rounded-xl transition-all shadow-md"
               >
                 <FileDown className="w-4 h-4" /> Serialize
@@ -146,7 +123,7 @@ export default function SerializationAnimation() {
               
               <button 
                 onClick={handleDeserialize} 
-                disabled={animating || (mode === "idle" && serializedArray.length !== SEQUENCE.length) || mode === "deserializing"}
+                disabled={engine.isPlaying || (mode === "idle" && serializedArray.length !== SEQUENCE.length) || mode === "deserializing"}
                 className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold bg-[#a435f0] hover:bg-[#8f2cd6] disabled:opacity-50 text-white rounded-xl transition-all shadow-md"
               >
                 <FileUp className="w-4 h-4" /> Deserialize
@@ -179,14 +156,14 @@ export default function SerializationAnimation() {
         </div>
 
         <PlaybackControls 
-          isPlaying={animating}
-          onPlayPause={animating ? pauseVisualizer : startVisualizer}
-          onStepForward={stepForward}
-          onStepBackward={stepBackward}
-          onReset={resetPlayback}
-          speed={speed}
-          onSpeedChange={setSpeed}
-          disabled={steps.length === 0}
+          isPlaying={engine.isPlaying}
+          onPlayPause={togglePlay}
+          onStepForward={engine.stepForward}
+          onStepBackward={engine.stepBackward}
+          onReset={() => { engine.reset(); }}
+          speed={engine.speed / 1000}
+          onSpeedChange={(s) => engine.setSpeed(s * 1000)}
+          disabled={frames.length === 0}
           showPlayPause={true}
         />
       </VisualizerCard>
@@ -195,7 +172,7 @@ export default function SerializationAnimation() {
         className={
           message.includes("Complete") 
             ? "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30"
-            : animating
+            : engine.isPlaying
                 ? "border-[#a435f0]/30 bg-[#a435f0]/10 dark:border-[#a435f0]/50 dark:bg-[#a435f0]/20"
                 : ""
         }
@@ -203,7 +180,7 @@ export default function SerializationAnimation() {
         <div className="flex items-center text-xs text-gray-500 font-semibold gap-1.5 mb-2">
           <Info className="w-4 h-4 text-[#a435f0]" /> Animation Status
           <span className="ml-auto font-bold bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-gray-600 dark:text-gray-400">
-            Step {currentStepIdx !== -1 ? currentStepIdx + 1 : 0} / {steps.length || 0}
+            Step {engine.currentStep !== -1 ? engine.currentStep + 1 : 0} / {frames.length || 0}
           </span>
         </div>
         <div className="text-lg font-medium min-h-[28px]">{message}</div>

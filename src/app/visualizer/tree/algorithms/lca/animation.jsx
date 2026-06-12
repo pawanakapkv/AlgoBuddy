@@ -1,15 +1,15 @@
 "use client";
-import React, { useState, useEffect, useRef } from "react";
-import { Search, RotateCcw, Info, RefreshCw } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { Search, Info, RefreshCw } from "lucide-react";
 import {
   VisualizerCard,
   VisualizerInteractiveLayout,
 } from "@/app/visualizer/components/VisualizerInteractiveLayout";
-import usePlayback from "@/app/hooks/usePlayback";
 import useVisualizerKeyboard from "@/app/hooks/useVisualizerKeyboard";
 import PlaybackControls from "@/app/components/ui/PlaybackControls";
 import useVisualizerReset from "@/app/hooks/useVisualizerReset";
 import { generateLcaSequence } from "@/features/algorithms/tree/lcaLogic";
+import { useAnimationEngine } from "@/lib/visualizer/useAnimationEngine";
 
 const NODES = [
   { id: "3", val: "3", x: 400, y: 60, parent: null },
@@ -31,69 +31,11 @@ const EDGES = NODES.filter(n => n.parent).map(n => {
 export default function LCAAnimation() {
   const [targetP, setTargetP] = useState("5");
   const [targetQ, setTargetQ] = useState("1");
-  const [animating, setAnimating] = useState(false);
-  const [message, setMessage] = useState("Select two nodes and click 'Find LCA' to trace the paths.");
-  
-  const [steps, setSteps] = useState([]);
-  const [currentStepIdx, setCurrentStepIdx] = useState(-1);
-  const { speed, setSpeed } = usePlayback(1);
-  const timerRef = useRef(null);
-  useVisualizerReset(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setTargetP("5");
-    setTargetQ("1");
-    setAnimating(false);
-    setMessage("...");
-    setSteps([]);
-    setCurrentStepIdx(-1);
-  });
+  const [isCalculated, setIsCalculated] = useState(false);
 
-  const currentStep = steps[currentStepIdx] || null;
-  const activeNode = currentStep ? currentStep.activeNode : null;
-  const visitedNodes = currentStep ? currentStep.visitedNodes : [];
-  const foundNodes = currentStep ? currentStep.foundNodes : [];
-  const backtrackingEdges = currentStep ? currentStep.backtrackingEdges : [];
-  const lcaNode = currentStep ? currentStep.lcaNode : null;
-
-
-  useEffect(() => {
-    if (currentStep) {
-      setMessage(currentStep.message);
-    }
-  }, [currentStep]);
-
-  useEffect(() => {
-    if (!animating || steps.length === 0) return;
-    if (currentStepIdx >= steps.length - 1) { setAnimating(false); return; }
-    timerRef.current = setTimeout(() => setCurrentStepIdx(p => p + 1), 1600 / speed);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [animating, currentStepIdx, steps, speed]);
-
-  const pauseVisualizer = () => { setAnimating(false); if (timerRef.current) clearTimeout(timerRef.current); };
-  const startVisualizer = () => {
-    if (steps.length === 0) return;
-    setAnimating(true);
-    const nextIdx = currentStepIdx === -1 || currentStepIdx >= steps.length - 1 ? 0 : currentStepIdx + 1;
-    setCurrentStepIdx(nextIdx);
-  };
-  const stepForward = () => { setAnimating(false); if (currentStepIdx < steps.length - 1) setCurrentStepIdx(p => p + 1); };
-  const stepBackward = () => { setAnimating(false); if (currentStepIdx > 0) setCurrentStepIdx(p => p - 1); };
-  const resetPlayback = () => {
-    setAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setCurrentStepIdx(-1);
-    setMessage("Playback reset.");
-  };
-
-
-
-  const handleFindLca = () => {
-    if (targetP === targetQ) {
-      setMessage("Please select two distinct nodes.");
-      return;
-    }
-    setAnimating(false);
-
+  const frames = useMemo(() => {
+    if (!isCalculated) return [];
+    
     const sequence = generateLcaSequence("3", targetP, targetQ, EDGES);
     const newSteps = [];
     
@@ -174,30 +116,67 @@ export default function LCAAnimation() {
         message: msg
       });
     }
+    
+    return newSteps;
+  }, [isCalculated, targetP, targetQ]);
 
-    setSteps(newSteps);
-    setCurrentStepIdx(0);
-    setAnimating(true);
+  const engine = useAnimationEngine({ steps: frames, initialSpeed: 1600 });
+
+  useVisualizerReset(() => {
+    setIsCalculated(false);
+    setTargetP("5");
+    setTargetQ("1");
+    engine.reset();
+  });
+
+  const handleFindLca = () => {
+    if (targetP === targetQ) {
+      alert("Please select two distinct nodes.");
+      return;
+    }
+    setIsCalculated(true);
+    engine.reset();
+    engine.play();
   };
 
   const handleReset = () => {
-    setAnimating(false);
-    setSteps([]);
-    setCurrentStepIdx(-1);
-    setMessage("Select two nodes and click 'Find LCA' to trace the paths.");
+    setIsCalculated(false);
+    engine.reset();
+  };
+
+  const togglePlay = () => {
+    if (engine.currentStep === frames.length - 1 && frames.length > 0) {
+      engine.reset();
+    } else if (engine.isPlaying) {
+      engine.pause();
+    } else {
+      engine.play();
+    }
   };
 
   useVisualizerKeyboard({
-    onStepForward: stepForward,
-    onStepBackward: stepBackward,
-    onTogglePlay: animating ? pauseVisualizer : startVisualizer,
-    onReset: resetPlayback,
-    onSpeedChange: setSpeed,
-    speed: speed,
-    sorting: animating,
+    onStepForward: engine.stepForward,
+    onStepBackward: engine.stepBackward,
+    onTogglePlay: togglePlay,
+    onReset: handleReset,
+    onSpeedChange: (s) => engine.setSpeed(s * 1000),
+    speed: engine.speed / 1000,
+    sorting: engine.isPlaying,
     sorted: false,
     enabled: true,
   });
+
+  const currentStep =
+    frames.length > 0 && engine.currentStep >= 0
+      ? frames[engine.currentStep]
+      : null;
+
+  const activeNode = currentStep ? currentStep.activeNode : null;
+  const visitedNodes = currentStep ? currentStep.visitedNodes : [];
+  const foundNodes = currentStep ? currentStep.foundNodes : [];
+  const backtrackingEdges = currentStep ? currentStep.backtrackingEdges : [];
+  const lcaNode = currentStep ? currentStep.lcaNode : null;
+  const message = currentStep ? currentStep.message : "Select two nodes and click 'Find LCA' to trace the paths.";
 
   // SVG Helper functions
   const getNodeFill = (nodeId) => {
@@ -233,7 +212,7 @@ export default function LCAAnimation() {
               <select 
                 value={targetP} 
                 onChange={e => setTargetP(e.target.value)}
-                disabled={animating}
+                disabled={engine.isPlaying || isCalculated}
                 className="bg-gray-50 text-amber-600 font-bold px-3 py-1.5 rounded-lg border border-gray-200 outline-none focus:border-amber-500 dark:bg-gray-800 dark:border-gray-700 dark:text-amber-500 disabled:opacity-50 transition-colors"
               >
                 {NODES.map(n => <option key={`p-${n.id}`} value={n.id}>{n.val}</option>)}
@@ -244,7 +223,7 @@ export default function LCAAnimation() {
               <select 
                 value={targetQ} 
                 onChange={e => setTargetQ(e.target.value)}
-                disabled={animating}
+                disabled={engine.isPlaying || isCalculated}
                 className="bg-gray-50 text-amber-600 font-bold px-3 py-1.5 rounded-lg border border-gray-200 outline-none focus:border-amber-500 dark:bg-gray-800 dark:border-gray-700 dark:text-amber-500 disabled:opacity-50 transition-colors"
               >
                 {NODES.map(n => <option key={`q-${n.id}`} value={n.id}>{n.val}</option>)}
@@ -255,7 +234,7 @@ export default function LCAAnimation() {
           <div className="flex items-center gap-3">
             <button 
               onClick={handleFindLca} 
-              disabled={animating}
+              disabled={engine.isPlaying || isCalculated}
               className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold bg-[#a435f0] hover:bg-[#8f2cd6] disabled:opacity-50 text-white rounded-xl transition-all shadow-md"
             >
               <Search className="w-4 h-4" /> Find LCA
@@ -270,14 +249,14 @@ export default function LCAAnimation() {
         </div>
 
         <PlaybackControls 
-          isPlaying={animating}
-          onPlayPause={animating ? pauseVisualizer : startVisualizer}
-          onStepForward={stepForward}
-          onStepBackward={stepBackward}
-          onReset={resetPlayback}
-          speed={speed}
-          onSpeedChange={setSpeed}
-          disabled={steps.length === 0}
+          isPlaying={engine.isPlaying}
+          onPlayPause={togglePlay}
+          onStepForward={engine.stepForward}
+          onStepBackward={engine.stepBackward}
+          onReset={() => { engine.reset(); }}
+          speed={engine.speed / 1000}
+          onSpeedChange={(s) => engine.setSpeed(s * 1000)}
+          disabled={frames.length === 0}
           showPlayPause={true}
         />
       </VisualizerCard>
@@ -285,8 +264,8 @@ export default function LCAAnimation() {
       <VisualizerCard
         className={
           lcaNode 
-            ? "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30"
-            : animating
+            ? "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30"
+            : engine.isPlaying
                 ? "border-[#a435f0]/30 bg-[#a435f0]/10 dark:border-[#a435f0]/50 dark:bg-[#a435f0]/20"
                 : ""
         }
@@ -294,7 +273,7 @@ export default function LCAAnimation() {
         <div className="flex items-center text-xs text-gray-500 font-semibold gap-1.5 mb-2">
           <Info className="w-4 h-4 text-[#a435f0]" /> Animation Status
           <span className="ml-auto font-bold bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-gray-600 dark:text-gray-400">
-            Step {currentStepIdx !== -1 ? currentStepIdx + 1 : 0} / {steps.length || 0}
+            Step {engine.currentStep !== -1 ? engine.currentStep + 1 : 0} / {frames.length || 0}
           </span>
         </div>
         <div className="text-lg font-medium min-h-[28px]">{message}</div>
