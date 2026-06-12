@@ -19,9 +19,9 @@ import {
   VisualizerCard,
   VisualizerInteractiveLayout,
 } from "@/app/visualizer/components/VisualizerInteractiveLayout";
-import usePlayback from "@/app/hooks/usePlayback";
 import PlaybackControls from "@/app/components/ui/PlaybackControls";
 import useVisualizerReset from "@/app/hooks/useVisualizerReset";
+import { useAnimationEngine } from "@/lib/visualizer/useAnimationEngine";
 import { findGenerator, unionGenerator } from "@/features/algorithms/tree/dsuLogic";
 
 export default function DsuAnimation() {
@@ -41,12 +41,29 @@ export default function DsuAnimation() {
   
   // Visualizer Status & Steps
   const [message, setMessage] = useState("Disjoint Set Union (Union-Find) Visualizer. Adjust toggles or enter an operation!");
-  const [isAnimating, setIsAnimating] = useState(false);
   const [steps, setSteps] = useState([]);
-  const [currentStepIdx, setCurrentStepIdx] = useState(-1);
-  const { speed, setSpeed } = usePlayback(1);
 
-  const timerRef = useRef(null);
+  const onStep = React.useCallback(
+    (step, idx) => {
+      if (!step) return;
+      setMessage(step.explanation || "");
+      if (step.parent) setParentArray(step.parent);
+      if (step.rank) setRankArray(step.rank);
+      if (step.size) setSizeArray(step.size);
+    },
+    []
+  );
+
+  const engine = useAnimationEngine({
+    steps,
+    onStep,
+    initialSpeed: 1000,
+  });
+
+  const currentStepIdx = steps.length > 0 ? engine.currentStep : -1;
+  const isAnimating = engine.isPlaying;
+  const speed = engine.speed;
+  const setSpeed = engine.setSpeed;
 
   // Initialize nodes
   useEffect(() => {
@@ -54,7 +71,7 @@ export default function DsuAnimation() {
   }, [numElements]);
 
   const resetDsu = (size) => {
-    if (timerRef.current) clearTimeout(timerRef.current);
+    if (engine) engine.reset();
     const initialParent = Array.from({ length: size }, (_, i) => i);
     const initialRank = new Array(size).fill(0);
     const initialSize = new Array(size).fill(1);
@@ -64,20 +81,12 @@ export default function DsuAnimation() {
     setSizeArray(initialSize);
     
     setSteps([]);
-    setCurrentStepIdx(-1);
-    setIsAnimating(false);
     setMessage(`DSU initialized with ${size} elements. Every node starts as its own representative root.`);
   };
 
   useVisualizerReset(() => {
     resetDsu(numElements);
   });
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
 
   // Compute Tree Layout (Parent pointing up to root)
   const computeTreeLayout = () => {
@@ -180,77 +189,26 @@ export default function DsuAnimation() {
 
   const { nodesList: layoutNodes, edgesList: layoutEdges, totalWidth: canvasWidth } = computeTreeLayout();
 
-  // Playback Step loop
-  useEffect(() => {
-    if (!isAnimating || steps.length === 0) return;
-
-    if (currentStepIdx >= steps.length) {
-      setIsAnimating(false);
-      return;
-    }
-
-    const currentStep = steps[currentStepIdx];
-    setMessage(currentStep.explanation);
-    
-    if (currentStep.parent) setParentArray(currentStep.parent);
-    if (currentStep.rank) setRankArray(currentStep.rank);
-    if (currentStep.size) setSizeArray(currentStep.size);
-
-    timerRef.current = setTimeout(() => {
-      if (currentStepIdx < steps.length - 1) {
-        setCurrentStepIdx(prev => prev + 1);
-      } else {
-        setIsAnimating(false);
-      }
-    }, 1800 / speed);
-
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [isAnimating, currentStepIdx, steps, speed]);
-
   const startVisualizer = () => {
     if (steps.length === 0) return;
-    setIsAnimating(true);
-    let nextIdx = currentStepIdx === -1 || currentStepIdx >= steps.length - 1 ? 0 : currentStepIdx + 1;
-    setCurrentStepIdx(nextIdx);
+    if (engine.currentStep >= steps.length - 1) engine.reset();
+    setTimeout(() => engine.play(), 0);
   };
 
   const pauseVisualizer = () => {
-    setIsAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
+    engine.pause();
   };
 
   const stepForward = () => {
-    setIsAnimating(false);
-    if (currentStepIdx < steps.length - 1) {
-      const nextIdx = currentStepIdx + 1;
-      setCurrentStepIdx(nextIdx);
-      const step = steps[nextIdx];
-      setMessage(step.explanation);
-      if (step.parent) setParentArray(step.parent);
-      if (step.rank) setRankArray(step.rank);
-      if (step.size) setSizeArray(step.size);
-    }
+    engine.stepForward();
   };
 
   const stepBackward = () => {
-    setIsAnimating(false);
-    if (currentStepIdx > 0) {
-      const prevIdx = currentStepIdx - 1;
-      setCurrentStepIdx(prevIdx);
-      const step = steps[prevIdx];
-      setMessage(step.explanation);
-      if (step.parent) setParentArray(step.parent);
-      if (step.rank) setRankArray(step.rank);
-      if (step.size) setSizeArray(step.size);
-    }
+    engine.stepBackward();
   };
 
   const resetPlayback = () => {
-    setIsAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setCurrentStepIdx(-1);
+    engine.reset();
     if (steps.length > 0 && steps[0].parentBefore) {
       setParentArray(steps[0].parentBefore);
       setRankArray(steps[0].rankBefore);
@@ -266,14 +224,13 @@ export default function DsuAnimation() {
       return;
     }
 
-    pauseVisualizer();
+    engine.reset();
     
     const gen = findGenerator(targetId, numElements, parentArray, rankArray, sizeArray, pathCompression);
     const newSteps = Array.from(gen);
 
     setSteps(newSteps);
-    setCurrentStepIdx(0);
-    setIsAnimating(true);
+    setTimeout(() => engine.play(), 0);
   };
 
   // Union Animation Generator
@@ -283,14 +240,13 @@ export default function DsuAnimation() {
       return;
     }
 
-    pauseVisualizer();
+    engine.reset();
     
     const gen = unionGenerator(x, y, numElements, parentArray, rankArray, sizeArray, unionByRank);
     const newSteps = Array.from(gen);
 
     setSteps(newSteps);
-    setCurrentStepIdx(0);
-    setIsAnimating(true);
+    setTimeout(() => engine.play(), 0);
   };
 
   const handleMakeSet = () => {

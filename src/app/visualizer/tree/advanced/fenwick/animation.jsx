@@ -7,10 +7,10 @@ import {
   VisualizerCard,
   VisualizerInteractiveLayout,
 } from "@/app/visualizer/components/VisualizerInteractiveLayout";
-import usePlayback from "@/app/hooks/usePlayback";
 import useVisualizerKeyboard from "@/app/hooks/useVisualizerKeyboard";
 import PlaybackControls from "@/app/components/ui/PlaybackControls";
 import useVisualizerReset from "@/app/hooks/useVisualizerReset";
+import { useAnimationEngine } from "@/lib/visualizer/useAnimationEngine";
 import { buildBIT, updateGenerator, queryGenerator } from "@/features/algorithms/tree/fenwickTreeLogic";
 
 const DEFAULT_ARRAY = [0, 5, 3, 7, 2, 6, 4, 8, 1]; // 1-indexed, index 0 unused
@@ -24,17 +24,42 @@ export default function FenwickAnimation() {
   const [queryR, setQueryR] = useState("");
   const [mode, setMode] = useState("update"); // "update" | "query"
   const [steps, setSteps] = useState([]);
-  const [currentStepIdx, setCurrentStepIdx] = useState(-1);
-  const [isAnimating, setIsAnimating] = useState(false);
-  const { speed, setSpeed } = usePlayback(1);
   const [message, setMessage] = useState("Enter an index & value to perform a point update, or query a range prefix sum.");
   const [highlightedBIT, setHighlightedBIT] = useState({}); // {index: state}
   const [highlightedBase, setHighlightedBase] = useState({});
   const [resultBox, setResultBox] = useState(null);
 
-  const timerRef = useRef(null);
+  // Snapshot before operation
+  const [baseBefore, setBaseBefore] = useState([...DEFAULT_ARRAY]);
+  const [bitBefore, setBitBefore] = useState(() => buildBIT(DEFAULT_ARRAY));
+
+  const onStep = React.useCallback(
+    (step, idx) => {
+      if (!step) return;
+      setHighlightedBIT(step.highlightedBIT || {});
+      setHighlightedBase(step.highlightedBase || {});
+      setMessage(step.explanation || "");
+      if (step.result !== undefined) setResultBox(step.result);
+      if (step.type === 'complete') {
+        if (step.newBase) setBaseArray(step.newBase);
+        if (step.newBit) setBit(step.newBit);
+      }
+    },
+    []
+  );
+
+  const engine = useAnimationEngine({
+    steps,
+    onStep,
+    initialSpeed: 1000,
+  });
+
+  const currentStepIdx = steps.length > 0 ? engine.currentStep : -1;
+  const isAnimating = engine.isPlaying;
+  const speed = engine.speed;
+  const setSpeed = engine.setSpeed;
   useVisualizerReset(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
+    engine.reset();
     setBaseArray([...DEFAULT_ARRAY]);
     setBit(buildBIT(DEFAULT_ARRAY));
     setInputIndex("");
@@ -43,8 +68,6 @@ export default function FenwickAnimation() {
     setQueryR("");
     setMode("update");
     setSteps([]);
-    setCurrentStepIdx(-1);
-    setIsAnimating(false);
     setMessage("...");
     setHighlightedBIT({});
     setHighlightedBase({});
@@ -53,42 +76,26 @@ export default function FenwickAnimation() {
   const n = baseArray.length - 1;
 
 
-  // Apply current step's highlight state
-  useEffect(() => {
-    if (currentStepIdx < 0 || currentStepIdx >= steps.length) return;
-    const step = steps[currentStepIdx];
-    setHighlightedBIT(step.highlightedBIT || {});
-    setHighlightedBase(step.highlightedBase || {});
-    setMessage(step.explanation || "");
-    if (step.result !== undefined) setResultBox(step.result);
-  }, [currentStepIdx, steps]);
-
-  // Animation loop
-  useEffect(() => {
-    if (!isAnimating || steps.length === 0) return;
-    if (currentStepIdx >= steps.length - 1) {
-      setIsAnimating(false);
-      return;
-    }
-    timerRef.current = setTimeout(() => {
-      setCurrentStepIdx(prev => prev + 1);
-    }, 1600 / speed);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [isAnimating, currentStepIdx, steps, speed]);
-
-  const pauseVisualizer = () => { setIsAnimating(false); if (timerRef.current) clearTimeout(timerRef.current); };
+  const pauseVisualizer = () => { engine.pause(); };
   const startVisualizer = () => {
     if (steps.length === 0) return;
-    setIsAnimating(true);
-    const nextIdx = currentStepIdx === -1 || currentStepIdx >= steps.length - 1 ? 0 : currentStepIdx + 1;
-    setCurrentStepIdx(nextIdx);
+    if (engine.currentStep >= steps.length - 1) engine.reset();
+    setTimeout(() => engine.play(), 0);
   };
-  const stepForward = () => { setIsAnimating(false); if (currentStepIdx < steps.length - 1) setCurrentStepIdx(p => p + 1); };
-  const stepBackward = () => { setIsAnimating(false); if (currentStepIdx > 0) setCurrentStepIdx(p => p - 1); };
+  const stepForward = () => { engine.stepForward(); };
+  const stepBackward = () => {
+    engine.stepBackward();
+    // If we backward off the 'complete' step, revert arrays to snapshot
+    const currentStep = steps[engine.currentStep > 0 ? engine.currentStep - 1 : 0];
+    if (currentStep?.type !== 'complete') {
+      setBaseArray([...baseBefore]);
+      setBit([...bitBefore]);
+    }
+  };
   const resetPlayback = () => {
-    setIsAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setCurrentStepIdx(-1);
+    engine.reset();
+    setBaseArray([...baseBefore]);
+    setBit([...bitBefore]);
     setHighlightedBIT({});
     setHighlightedBase({});
     setResultBox(null);
@@ -96,11 +103,10 @@ export default function FenwickAnimation() {
   };
 
   const handleReset = () => {
-    setIsAnimating(false);
+    engine.reset();
     setBaseArray([...DEFAULT_ARRAY]);
     setBit(buildBIT(DEFAULT_ARRAY));
     setSteps([]);
-    setCurrentStepIdx(-1);
     setHighlightedBIT({});
     setHighlightedBase({});
     setResultBox(null);
@@ -113,8 +119,10 @@ export default function FenwickAnimation() {
     const idx = parseInt(inputIndex);
     const delta = parseInt(inputValue);
     
-    setIsAnimating(false);
+    engine.reset();
     setResultBox(null);
+    setBaseBefore([...baseArray]);
+    setBitBefore([...bit]);
 
     const gen = updateGenerator(idx, delta, baseArray, bit, n);
     const newSteps = [];
@@ -125,16 +133,11 @@ export default function FenwickAnimation() {
         return;
       }
       newSteps.push(step);
-      if (step.type === 'complete') {
-        setBaseArray(step.newBase);
-        setBit(step.newBit);
-      }
     }
 
     setInputIndex(""); setInputValue("");
     setSteps(newSteps);
-    setCurrentStepIdx(0);
-    setIsAnimating(true);
+    setTimeout(() => engine.play(), 0);
   };
 
   // === PREFIX SUM QUERY ===
@@ -142,8 +145,10 @@ export default function FenwickAnimation() {
     const l = parseInt(queryL);
     const r = parseInt(queryR);
     
-    setIsAnimating(false);
+    engine.reset();
     setResultBox(null);
+    setBaseBefore([...baseArray]);
+    setBitBefore([...bit]);
 
     const gen = queryGenerator(l, r, bit, n);
     const newSteps = [];
@@ -158,8 +163,7 @@ export default function FenwickAnimation() {
 
     setQueryL(""); setQueryR("");
     setSteps(newSteps);
-    setCurrentStepIdx(0);
-    setIsAnimating(true);
+    setTimeout(() => engine.play(), 0);
   };
 
   useVisualizerKeyboard({

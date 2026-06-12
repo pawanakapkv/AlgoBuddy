@@ -9,9 +9,10 @@ import {
   VisualizerCard,
   VisualizerInteractiveLayout,
 } from "@/app/visualizer/components/VisualizerInteractiveLayout";
-import usePlayback from "@/app/hooks/usePlayback";
 import useVisualizerKeyboard from "@/app/hooks/useVisualizerKeyboard";
 import PlaybackControls from "@/app/components/ui/PlaybackControls";
+import useVisualizerReset from "@/app/hooks/useVisualizerReset";
+import { useAnimationEngine } from "@/lib/visualizer/useAnimationEngine";
 import useVisualizerReset from "@/app/hooks/useVisualizerReset";
 import { BTreeManager, T, cloneTree } from "@/features/algorithms/tree/bTreeLogic";
 
@@ -68,19 +69,34 @@ export default function BTreeAnimation() {
   const [searchValue, setSearchValue] = useState("");
   const [mode, setMode] = useState("insert");
   const [steps, setSteps] = useState([]);
-  const [currentStepIdx, setCurrentStepIdx] = useState(-1);
-  const [isAnimating, setIsAnimating] = useState(false);
-  const { speed, setSpeed } = usePlayback(1);
   const [message, setMessage] = useState(`B-Tree pre-loaded (order ${2 * T}, max ${2 * T - 1} keys/node)! Insert or Search keys.`);
   const [highlighted, setHighlighted] = useState({});
 
-  const timerRef = useRef(null);
+  const onStep = React.useCallback(
+    (step, idx) => {
+      if (!step) return;
+      setDisplayRoot(step.tree);
+      setHighlighted(step.highlighted || {});
+      setMessage(step.explanation || "");
+    },
+    []
+  );
+
+  const engine = useAnimationEngine({
+    steps,
+    onStep,
+    initialSpeed: 1000,
+  });
+
+  const currentStepIdx = steps.length > 0 ? engine.currentStep : -1;
+  const isAnimating = engine.isPlaying;
+  const speed = engine.speed;
+  const setSpeed = engine.setSpeed;
+
   useVisualizerReset(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setIsAnimating(false);
+    engine.reset();
     setMessage("...");
     setSteps([]);
-    setCurrentStepIdx(-1);
   });
 
   // Initialize tree
@@ -96,41 +112,23 @@ export default function BTreeAnimation() {
 
 
 
-  useEffect(() => {
-    if (currentStepIdx < 0 || currentStepIdx >= steps.length) return;
-    const step = steps[currentStepIdx];
-    setDisplayRoot(step.tree);
-    setHighlighted(step.highlighted || {});
-    setMessage(step.explanation || "");
-  }, [currentStepIdx, steps]);
-
-  useEffect(() => {
-    if (!isAnimating || steps.length === 0) return;
-    if (currentStepIdx >= steps.length - 1) { setIsAnimating(false); return; }
-    timerRef.current = setTimeout(() => setCurrentStepIdx(p => p + 1), 1600 / speed);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [isAnimating, currentStepIdx, steps, speed]);
-
-  const pauseVisualizer = () => { setIsAnimating(false); if (timerRef.current) clearTimeout(timerRef.current); };
+  const pauseVisualizer = () => { engine.pause(); };
   const startVisualizer = () => {
     if (steps.length === 0) return;
-    setIsAnimating(true);
-    const nextIdx = currentStepIdx === -1 || currentStepIdx >= steps.length - 1 ? 0 : currentStepIdx + 1;
-    setCurrentStepIdx(nextIdx);
+    if (engine.currentStep >= steps.length - 1) engine.reset();
+    setTimeout(() => engine.play(), 0);
   };
-  const stepForward = () => { setIsAnimating(false); if (currentStepIdx < steps.length - 1) setCurrentStepIdx(p => p + 1); };
-  const stepBackward = () => { setIsAnimating(false); if (currentStepIdx > 0) setCurrentStepIdx(p => p - 1); };
+  const stepForward = () => { engine.stepForward(); };
+  const stepBackward = () => { engine.stepBackward(); };
   const resetPlayback = () => {
-    setIsAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setCurrentStepIdx(-1);
+    engine.reset();
     setHighlighted({});
     setDisplayRoot(managerRef.current ? cloneTree(managerRef.current.root) : null);
     setMessage("Playback reset.");
   };
 
   const handleReset = () => {
-    setIsAnimating(false);
+    engine.reset();
     const mgr = new BTreeManager();
     for (const key of INITIAL_KEYS) {
       const gen = mgr.insertGenerator(key);
@@ -139,7 +137,6 @@ export default function BTreeAnimation() {
     managerRef.current = mgr;
     setDisplayRoot(cloneTree(mgr.root));
     setSteps([]);
-    setCurrentStepIdx(-1);
     setHighlighted({});
     setInputValue(""); setSearchValue("");
     setMessage(`Tree reset to default (order ${2 * T}). Insert or search keys.`);
@@ -148,29 +145,27 @@ export default function BTreeAnimation() {
   const triggerInsert = () => {
     const key = parseInt(inputValue);
     if (isNaN(key) || key < 1 || key > 999) { setMessage("⚠️ Enter a valid key (1-999)."); return; }
-    setIsAnimating(false);
+    engine.reset();
     setInputValue("");
     
     const gen = managerRef.current.insertGenerator(key);
     const newSteps = Array.from(gen);
     
     setSteps(newSteps);
-    setCurrentStepIdx(0);
-    setIsAnimating(true);
+    setTimeout(() => engine.play(), 0);
   };
 
   const triggerSearch = () => {
     const key = parseInt(searchValue);
     if (isNaN(key) || key < 1 || key > 999) { setMessage("⚠️ Enter a valid key to search (1-999)."); return; }
-    setIsAnimating(false);
+    engine.reset();
     setSearchValue("");
     
     const gen = managerRef.current.searchGenerator(key);
     const newSteps = Array.from(gen);
     
     setSteps(newSteps);
-    setCurrentStepIdx(0);
-    setIsAnimating(true);
+    setTimeout(() => engine.play(), 0);
   };
 
   useVisualizerKeyboard({

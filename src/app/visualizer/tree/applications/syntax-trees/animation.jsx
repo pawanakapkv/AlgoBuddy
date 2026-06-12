@@ -5,25 +5,40 @@ import {
   VisualizerCard,
   VisualizerInteractiveLayout,
 } from "@/app/visualizer/components/VisualizerInteractiveLayout";
-import usePlayback from "@/app/hooks/usePlayback";
 import useVisualizerKeyboard from "@/app/hooks/useVisualizerKeyboard";
 import PlaybackControls from "@/app/components/ui/PlaybackControls";
 import useVisualizerReset from "@/app/hooks/useVisualizerReset";
+import { useAnimationEngine } from "@/lib/visualizer/useAnimationEngine";
 
 export default function SyntaxTreesAnimation() {
   const [animating, setAnimating] = useState(false);
   const [message, setMessage] = useState("Click 'Evaluate AST' to evaluate: 3 + (5 * 2)");
   
   const [steps, setSteps] = useState([]);
-  const [currentStepIdx, setCurrentStepIdx] = useState(-1);
-  const { speed, setSpeed } = usePlayback(1);
-  const timerRef = useRef(null);
+
+  const onStep = React.useCallback(
+    (step, idx) => {
+      if (!step) return;
+      setMessage(step.message || "");
+    },
+    []
+  );
+
+  const engine = useAnimationEngine({
+    steps,
+    onStep,
+    initialSpeed: 1000,
+  });
+
+  const animating = engine.isPlaying;
+  const currentStepIdx = steps.length > 0 ? engine.currentStep : -1;
+  const speed = engine.speed;
+  const setSpeed = engine.setSpeed;
+
   useVisualizerReset(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setAnimating(false);
+    engine.reset();
     setMessage("...");
     setSteps([]);
-    setCurrentStepIdx(-1);
   });
 
   // Derived state from steps
@@ -32,38 +47,21 @@ export default function SyntaxTreesAnimation() {
   const activeEdge = currentStep ? currentStep.activeEdge : null;
   const nodeValues = currentStep && currentStep.nodeValues ? currentStep.nodeValues : { N1: "?", N2: "3", N3: "?", N4: "5", N5: "2" };
 
-
-  useEffect(() => {
-    if (currentStep) {
-      setMessage(currentStep.message);
-    }
-  }, [currentStep]);
-
-  useEffect(() => {
-    if (!animating || steps.length === 0) return;
-    if (currentStepIdx >= steps.length - 1) { setAnimating(false); return; }
-    timerRef.current = setTimeout(() => setCurrentStepIdx(p => p + 1), 1600 / speed);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [animating, currentStepIdx, steps, speed]);
-
-  const pauseVisualizer = () => { setAnimating(false); if (timerRef.current) clearTimeout(timerRef.current); };
+  const pauseVisualizer = () => { engine.pause(); };
   const startVisualizer = () => {
     if (steps.length === 0) return;
-    setAnimating(true);
-    const nextIdx = currentStepIdx === -1 || currentStepIdx >= steps.length - 1 ? 0 : currentStepIdx + 1;
-    setCurrentStepIdx(nextIdx);
+    if (engine.currentStep >= steps.length - 1) engine.reset();
+    setTimeout(() => engine.play(), 0);
   };
-  const stepForward = () => { setAnimating(false); if (currentStepIdx < steps.length - 1) setCurrentStepIdx(p => p + 1); };
-  const stepBackward = () => { setAnimating(false); if (currentStepIdx > 0) setCurrentStepIdx(p => p - 1); };
+  const stepForward = () => { engine.stepForward(); };
+  const stepBackward = () => { engine.stepBackward(); };
   const resetPlayback = () => {
-    setAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setCurrentStepIdx(-1);
+    engine.reset();
     setMessage("Playback reset.");
   };
 
   const evaluateAST = () => {
-    setAnimating(false);
+    engine.reset();
     const newSteps = [];
     
     let vals = { N1: "?", N2: "3", N3: "?", N4: "5", N5: "2" };
@@ -111,14 +109,12 @@ export default function SyntaxTreesAnimation() {
     });
 
     setSteps(newSteps);
-    setCurrentStepIdx(0);
-    setAnimating(true);
+    setTimeout(() => engine.play(), 0);
   };
 
   const handleReset = () => {
-    setAnimating(false);
+    engine.reset();
     setSteps([]);
-    setCurrentStepIdx(-1);
     setMessage("Click 'Evaluate AST' to evaluate: 3 + (5 * 2)");
   };
 

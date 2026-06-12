@@ -9,10 +9,9 @@ import {
   VisualizerCard,
   VisualizerInteractiveLayout,
 } from "@/app/visualizer/components/VisualizerInteractiveLayout";
-import usePlayback from "@/app/hooks/usePlayback";
-import useVisualizerKeyboard from "@/app/hooks/useVisualizerKeyboard";
 import PlaybackControls from "@/app/components/ui/PlaybackControls";
 import useVisualizerReset from "@/app/hooks/useVisualizerReset";
+import { useAnimationEngine } from "@/lib/visualizer/useAnimationEngine";
 
 // Internal Trie Node Class for coordinate mapping
 class TrieNode {
@@ -31,10 +30,26 @@ export default function TrieAnimation() {
   const [nodeIdCounter, setNodeIdCounter] = useState(0);
   const [inputValue, setInputValue] = useState("");
   const [message, setMessage] = useState("Add some words to build your Prefix Tree! Click 'Insert' to start.");
-  const { speed, setSpeed } = usePlayback(1);
-  const [isAnimating, setIsAnimating] = useState(false);
   const [steps, setSteps] = useState([]);
-  const [currentStepIdx, setCurrentStepIdx] = useState(-1);
+
+  const onStep = React.useCallback(
+    (step, idx) => {
+      if (!step) return;
+      setMessage(step.explanation || "");
+    },
+    []
+  );
+
+  const engine = useAnimationEngine({
+    steps,
+    onStep,
+    initialSpeed: 1000,
+  });
+
+  const currentStepIdx = steps.length > 0 ? engine.currentStep : -1;
+  const isAnimating = engine.isPlaying;
+  const speed = engine.speed;
+  const setSpeed = engine.setSpeed;
 
   // Setup initial words for a stunning first-time impression
   useEffect(() => {
@@ -61,24 +76,14 @@ export default function TrieAnimation() {
     setRoot(newRoot);
   }, []);
 
-  const timerRef = useRef(null);
   useVisualizerReset(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
+    engine.reset();
     setRoot(null);
     setNodeIdCounter(0);
     setInputValue("");
     setMessage("...");
-    setIsAnimating(false);
     setSteps([]);
-    setCurrentStepIdx(-1);
   });
-
-  // Clean up timers on unmount
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
 
   // 1. Recursive symmetric layout calculator (Reingold-Tilford style)
   const computeTreeLayout = (trieRoot) => {
@@ -164,70 +169,21 @@ export default function TrieAnimation() {
 
   const svgDimensions = getSvgDimensions();
 
-  // Animation logic play loop
-  useEffect(() => {
-    if (!isAnimating || steps.length === 0) return;
-
-    if (currentStepIdx >= steps.length) {
-      setIsAnimating(false);
-      return;
-    }
-
-    const currentStep = steps[currentStepIdx];
-    setMessage(currentStep.explanation);
-
-    timerRef.current = setTimeout(() => {
-      if (currentStepIdx < steps.length - 1) {
-        setCurrentStepIdx(prev => prev + 1);
-      } else {
-        setIsAnimating(false);
-        const finalStep = steps[steps.length - 1];
-        setMessage(finalStep.explanation);
-      }
-    }, 1800 / speed);
-
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [isAnimating, currentStepIdx, steps, speed]);
-
-  // Actions
-  const pauseVisualizer = () => {
-    setIsAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-  };
-
+  const pauseVisualizer = () => { engine.pause(); };
   const startVisualizer = () => {
     if (steps.length === 0) return;
-    setIsAnimating(true);
-    let nextIdx = currentStepIdx === -1 || currentStepIdx >= steps.length - 1 ? 0 : currentStepIdx + 1;
-    setCurrentStepIdx(nextIdx);
+    if (engine.currentStep >= steps.length - 1) engine.reset();
+    setTimeout(() => engine.play(), 0);
   };
-
-  const stepForward = () => {
-    setIsAnimating(false);
-    if (currentStepIdx < steps.length - 1) {
-      setCurrentStepIdx(prev => prev + 1);
-    }
-  };
-
-  const stepBackward = () => {
-    setIsAnimating(false);
-    if (currentStepIdx > 0) {
-      setCurrentStepIdx(prev => prev - 1);
-    }
-  };
-
+  const stepForward = () => { engine.stepForward(); };
+  const stepBackward = () => { engine.stepBackward(); };
   const resetPlayback = () => {
-    setIsAnimating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setCurrentStepIdx(-1);
+    engine.reset();
     setMessage("Playback reset. Click play to begin.");
   };
 
   const handleClearTree = () => {
-    setIsAnimating(false);
-    setCurrentStepIdx(-1);
+    engine.reset();
     setSteps([]);
     setRoot(new TrieNode("", "root"));
     setNodeIdCounter(0);
@@ -242,7 +198,7 @@ export default function TrieAnimation() {
       return;
     }
 
-    setIsAnimating(false);
+    engine.reset();
     setInputValue("");
 
     const newSteps = [];
@@ -339,8 +295,7 @@ export default function TrieAnimation() {
 
     updateRealTree();
     setSteps(newSteps);
-    setCurrentStepIdx(0);
-    setIsAnimating(true);
+    setTimeout(() => engine.play(), 0);
   };
 
   // Pre-calculated animation generator for SEARCH
@@ -351,7 +306,7 @@ export default function TrieAnimation() {
       return;
     }
 
-    setIsAnimating(false);
+    engine.reset();
     setInputValue("");
 
     const newSteps = [];
@@ -427,8 +382,7 @@ export default function TrieAnimation() {
     }
 
     setSteps(newSteps);
-    setCurrentStepIdx(0);
-    setIsAnimating(true);
+    setTimeout(() => engine.play(), 0);
   };
 
   // Pre-calculated animation generator for PREFIX SEARCH
@@ -439,7 +393,7 @@ export default function TrieAnimation() {
       return;
     }
 
-    setIsAnimating(false);
+    engine.reset();
     setInputValue("");
 
     const newSteps = [];
@@ -504,8 +458,7 @@ export default function TrieAnimation() {
     }
 
     setSteps(newSteps);
-    setCurrentStepIdx(0);
-    setIsAnimating(true);
+    setTimeout(() => engine.play(), 0);
   };
 
   useVisualizerKeyboard({
