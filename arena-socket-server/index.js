@@ -515,6 +515,22 @@ io.on("connection", async (socket) => {
     }
   });
 
+  socket.on("join_spectator", async (data) => {
+    try {
+      if (!data.matchId) return;
+      const matchStr = await redisClient.get(`{arena}:match:${data.matchId}`);
+      if (!matchStr) return;
+      
+      // Spectator simply joins the socket.io room to receive broadcasts.
+      socket.join(data.matchId);
+      // We explicitly DO NOT set {arena}:socket:${socket.id} -> matchId in Redis, 
+      // preventing the spectator from emitting events.
+      console.log(`Spectator ${socket.data.userId} joined match ${data.matchId}`);
+    } catch (error) {
+      console.error(`[join_spectator] Error for user ${socket.data.userId}:`, error);
+    }
+  });
+
   // Duel Room Events
   socket.on("typing_status", async (data) => {
     try {
@@ -736,6 +752,26 @@ app.get("/debug", async (req, res) => {
 
 app.get("/health", (req, res) => {
   res.json({ status: "Arena Socket Server is running with Redis!" });
+});
+
+app.get("/api/matches/active", async (req, res) => {
+  try {
+    const matchKeys = await scanRedisKeys("{arena}:match:*");
+    const activeMatches = [];
+    for (const key of matchKeys) {
+      if (key.endsWith(":completed")) continue;
+      const matchStr = await redisClient.get(key);
+      if (matchStr) {
+        const match = JSON.parse(matchStr);
+        if (match.status === "in-progress") {
+          activeMatches.push(match);
+        }
+      }
+    }
+    res.json({ matches: activeMatches });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 server.listen(PORT, () => {
