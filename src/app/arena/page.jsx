@@ -32,12 +32,8 @@ import { useArenaProfile } from "@/app/hooks/useArenaProfile";
 import { useSheetProgress } from "@/app/hooks/useSheetProgress";
 import { practiceData } from "@/lib/practiceData";
 
-// Mock live battles feed
-const LIVE_BATTLES = [
-  { id: "l1", p1: "Pankaj", p2: "Rahul", topic: "Two Sum", time: "03:24", difficulty: "Medium", color: "orange" },
-  { id: "l2", p2: "Rohit", p1: "Ananya", topic: "Binary Search", time: "05:12", difficulty: "Easy", color: "green" },
-  { id: "l3", p1: "Aditya", p2: "Aryan", topic: "N-Queens", time: "08:45", difficulty: "Hard", color: "red" }
-];
+// We will fetch real live matches from the backend
+// Remove mock LIVE_BATTLES
 
 const ACHIEVEMENT_BADGES = [
   { title: "Module Master", icon: "🏆" },
@@ -113,6 +109,31 @@ export default function ArenaPage() {
       window.removeEventListener("hashchange", handleHashChange);
     };
   }, [user, router]);
+
+  // Live Matches polling
+  const [liveMatches, setLiveMatches] = useState([]);
+
+  useEffect(() => {
+    const fetchLiveMatches = async () => {
+      try {
+        const socketUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+          ? "http://127.0.0.1:4000"
+          : "https://algobuddy-socket-server.onrender.com";
+          
+        const res = await fetch(`${socketUrl}/api/matches/active`);
+        if (res.ok) {
+          const data = await res.json();
+          setLiveMatches(data.matches || []);
+        }
+      } catch (err) {
+        console.error("Failed to fetch live matches:", err);
+      }
+    };
+
+    fetchLiveMatches();
+    const interval = setInterval(fetchLiveMatches, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Modals state
   const [matchmakingOpen, setMatchmakingOpen] = useState(false);
@@ -199,11 +220,16 @@ export default function ArenaPage() {
     setDuelSimulatorOpen(true);
   };
 
-  const handleWatchLive = (p1, p2, topic) => {
-    setSelectedOpponent({ name: p2, rating: 2100, level: 15, avatar: p2.slice(0, 2).toUpperCase() });
-    setActiveDuelProblem(topic);
-    setDuelSimulatorOpen(true);
+  const handleWatchLive = (matchData) => {
+    // For now, we open a placeholder or we can open SpectatorSimulatorModal (will be created in branch 3)
+    console.log("Watching match:", matchData);
+    // Let's store it in state so we can pass it to the SpectatorModal
+    setSpectatingMatch(matchData);
+    setSpectatorModalOpen(true);
   };
+
+  const [spectatorModalOpen, setSpectatorModalOpen] = useState(false);
+  const [spectatingMatch, setSpectatingMatch] = useState(null);
 
   const handleCreateMatchLaunch = (matchConfig) => {
     setCreateDuelOpen(false);
@@ -457,34 +483,35 @@ export default function ArenaPage() {
                     </div>
 
                     <div className="space-y-3">
-                      {LIVE_BATTLES.slice(0, 2).map((b) => (
-                        <div key={b.id} className="flex items-center justify-between p-3 border border-slate-100 dark:border-neutral-900/60 bg-slate-50/20 dark:bg-neutral-900/20 rounded-xl gap-4">
+                      {liveMatches.length > 0 ? liveMatches.slice(0, 2).map((b) => {
+                        const p1 = b.players?.[0]?.name || "Player 1";
+                        const p2 = b.players?.[1]?.name || "Player 2";
+                        return (
+                        <div key={b.matchId} className="flex items-center justify-between p-3 border border-slate-100 dark:border-neutral-900/60 bg-slate-50/20 dark:bg-neutral-900/20 rounded-xl gap-4">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1.5">
                               <span className="text-xs font-bold text-slate-700 dark:text-neutral-300 truncate">
-                                {b.p1} vs {b.p2}
+                                {p1} vs {p2}
                               </span>
                             </div>
                             <div className="flex items-center gap-3 text-[10px] text-slate-400 dark:text-neutral-500">
                               <span className="flex items-center gap-1">
-                                <Clock size={10} />
-                                {b.time}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <span className={`w-1.5 h-1.5 rounded-full ${b.color === "green" ? "bg-green-500" : "bg-amber-500"
+                                <span className={`w-1.5 h-1.5 rounded-full ${b.difficulty === "Easy" ? "bg-green-500" : b.difficulty === "Hard" ? "bg-red-500" : "bg-amber-500"
                                   }`} />
                                 {b.topic} ({b.difficulty})
                               </span>
                             </div>
                           </div>
                           <button
-                            onClick={() => handleWatchLive(b.p1, b.p2, b.topic)}
+                            onClick={() => handleWatchLive(b)}
                             className="px-3 py-1.5 border border-primary/20 dark:border-purple-500/20 text-primary dark:text-purple-400 hover:bg-primary hover:text-white dark:hover:bg-purple-500 rounded-lg text-xs font-bold transition shrink-0"
                           >
                             Watch Live
                           </button>
                         </div>
-                      ))}
+                      )}) : (
+                        <div className="text-xs text-slate-500 p-2 text-center">No active battles right now.</div>
+                      )}
                     </div>
                   </div>
 
@@ -704,20 +731,25 @@ export default function ArenaPage() {
 
                 {activeTab === "live" && (
                   <div className="w-full max-w-md space-y-3 text-left">
-                    {LIVE_BATTLES.map((b) => (
-                      <div key={b.id} className="flex items-center justify-between p-3.5 border border-slate-100 dark:border-neutral-900 rounded-xl text-xs">
+                    {liveMatches.length > 0 ? liveMatches.map((b) => {
+                      const p1 = b.players?.[0]?.name || "Player 1";
+                      const p2 = b.players?.[1]?.name || "Player 2";
+                      return (
+                      <div key={b.matchId} className="flex items-center justify-between p-3.5 border border-slate-100 dark:border-neutral-900 rounded-xl text-xs">
                         <div>
-                          <div className="font-bold text-slate-700 dark:text-neutral-200 mb-1">{b.p1} vs {b.p2}</div>
+                          <div className="font-bold text-slate-700 dark:text-neutral-200 mb-1">{p1} vs {p2}</div>
                           <div className="text-[10px] text-slate-400">{b.topic} • {b.difficulty}</div>
                         </div>
                         <button
-                          onClick={() => handleWatchLive(b.p1, b.p2, b.topic)}
+                          onClick={() => handleWatchLive(b)}
                           className="px-3 py-1.5 bg-primary text-white rounded-lg font-bold"
                         >
                           Watch Live
                         </button>
                       </div>
-                    ))}
+                    )}) : (
+                      <div className="text-center text-xs text-slate-500">No active battles right now.</div>
+                    )}
                   </div>
                 )}
 
