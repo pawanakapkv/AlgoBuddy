@@ -16,6 +16,11 @@ export default function DuelSimulatorModal({ isOpen, onClose, opponent, currentU
   const [battleFinished, setBattleFinished] = useState(false);
   const [victoryState, setVictoryState] = useState(null); // "victory" or "defeat"
   const [isExecuting, setIsExecuting] = useState(false);
+
+  // Live Speedometer State
+  const [keystrokes, setKeystrokes] = useState([]);
+  const [cpm, setCpm] = useState(0);
+
   const [socket, setSocket] = useState(null);
 
   const logContainerRef = useRef(null);
@@ -212,15 +217,36 @@ export default function DuelSimulatorModal({ isOpen, onClose, opponent, currentU
 
   const handleCodeChange = (value) => {
     setUserCode(value);
+    
+    // Calculate Live CPM (Characters Per Minute over last 5s)
+    const now = Date.now();
+    let calculatedCpm = 0;
+    setKeystrokes((prev) => {
+      const recent = prev.filter(t => now - t < 5000);
+      recent.push(now);
+      calculatedCpm = Math.floor((recent.length / 5) * 60);
+      return recent;
+    });
+    setCpm(calculatedCpm);
+
     if (socket && opponent?.matchId) {
       // Clear existing timeout
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
+        // Frequently broadcast updated CPM while typing
+        if (Math.random() > 0.5) {
+          socket.emit("typing_status", {
+            matchId: opponent.matchId,
+            isTyping: true,
+            cpm: calculatedCpm
+          });
+        }
       } else {
         // If no timeout existed, we just started typing!
         socket.emit("typing_status", {
           matchId: opponent.matchId,
-          isTyping: true
+          isTyping: true,
+          cpm: calculatedCpm
         });
       }
 
@@ -228,7 +254,8 @@ export default function DuelSimulatorModal({ isOpen, onClose, opponent, currentU
       typingTimeoutRef.current = setTimeout(() => {
         socket.emit("typing_status", {
           matchId: opponent.matchId,
-          isTyping: false
+          isTyping: false,
+          cpm: 0
         });
         typingTimeoutRef.current = null;
       }, 1500);

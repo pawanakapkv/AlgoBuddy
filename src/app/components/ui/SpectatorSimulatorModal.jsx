@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Terminal, Eye } from "lucide-react";
 
 import { io } from "socket.io-client";
+import PlayerSpeedometer from "./spectator/PlayerSpeedometer";
 
 export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) {
   const [seconds, setSeconds] = useState(0);
@@ -13,6 +14,9 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
 
   const [p1Status, setP1Status] = useState("Idle");
   const [p2Status, setP2Status] = useState("Idle");
+  
+  const [p1Cpm, setP1Cpm] = useState(0);
+  const [p2Cpm, setP2Cpm] = useState(0);
   
   const [p1TestOutput, setP1TestOutput] = useState("");
   const [p2TestOutput, setP2TestOutput] = useState("");
@@ -44,8 +48,10 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
       console.log("SPECTATOR RECEIVED TYPING STATUS", data);
       if (data.userId === p1.userId) {
         setP1Status(data.isTyping ? "Typing..." : "Idle");
+        if (data.cpm !== undefined) setP1Cpm(data.cpm);
       } else if (data.userId === p2.userId) {
         setP2Status(data.isTyping ? "Typing..." : "Idle");
+        if (data.cpm !== undefined) setP2Cpm(data.cpm);
       }
     });
 
@@ -157,6 +163,9 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
                 <p className="text-xs text-slate-500 max-w-xs">
                   Raw code visibility is restricted to prevent unfair advantages. You are viewing live status updates.
                 </p>
+                
+                {/* Live Speedometer */}
+                <PlayerSpeedometer cpm={p1Cpm} />
 
                 {p1TestOutput && (
                   <div className={`mt-6 p-3 rounded-xl border w-full max-w-sm ${p1TestOutput.includes("Passed") ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" : "bg-red-500/10 border-red-500/20 text-red-500"}`}>
@@ -196,6 +205,9 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
                 <p className="text-xs text-slate-500 max-w-xs">
                   Raw code visibility is restricted to prevent unfair advantages. You are viewing live status updates.
                 </p>
+                
+                {/* Live Speedometer */}
+                <PlayerSpeedometer cpm={p2Cpm} />
 
                 {p2TestOutput && (
                   <div className={`mt-6 p-3 rounded-xl border w-full max-w-sm ${p2TestOutput.includes("Passed") ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" : "bg-red-500/10 border-red-500/20 text-red-500"}`}>
