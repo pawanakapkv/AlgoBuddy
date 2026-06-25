@@ -548,6 +548,20 @@ io.on("connection", async (socket) => {
     }
   });
 
+  socket.on("spectator_emote", async (data) => {
+    try {
+      if (await isRateLimited(socket.data.userId)) return;
+      if (!data.matchId || !data.emoji) return;
+      
+      socket.to(data.matchId).emit("spectator_emote", {
+        emoji: data.emoji,
+        id: data.id
+      });
+    } catch (error) {
+      console.error(`[spectator_emote] Error:`, error);
+    }
+  });
+
   // Duel Room Events
   socket.on("typing_status", async (data) => {
     try {

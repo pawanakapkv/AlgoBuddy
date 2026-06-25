@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Terminal, Eye } from "lucide-react";
 
 import { io } from "socket.io-client";
+import SpectatorEmotes from "./spectator/SpectatorEmotes";
 
 export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) {
   const [seconds, setSeconds] = useState(0);
@@ -19,6 +20,8 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
 
   const [matchEnded, setMatchEnded] = useState(false);
   const [winnerId, setWinnerId] = useState(null);
+  
+  const [socketInstance, setSocketInstance] = useState(null);
 
   // Socket Connection for real-time status
   useEffect(() => {
@@ -34,6 +37,7 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
         username: "Spectator"
       }
     });
+    setSocketInstance(socket);
 
     socket.on("connect", () => {
       console.log("Spectator Socket Connected");
@@ -206,6 +210,8 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
               </div>
             </div>
           </div>
+          
+          <SpectatorEmotes socket={socketInstance} matchId={matchData?.matchId} />
         </motion.div>
       </div>
     </AnimatePresence>
