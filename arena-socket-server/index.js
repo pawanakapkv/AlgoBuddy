@@ -548,6 +548,22 @@ io.on("connection", async (socket) => {
     }
   });
 
+  socket.on("spectator_chat", async (data) => {
+    try {
+      if (await isRateLimited(socket.data.userId)) return;
+      if (!data.matchId || !data.message) return;
+      
+      // Broadcast chat message to the room (which includes other spectators)
+      socket.to(data.matchId).emit("spectator_chat", {
+        userId: socket.data.userId,
+        username: socket.data.username || "Spectator",
+        message: data.message.substring(0, 200) // basic validation
+      });
+    } catch (error) {
+      console.error(`[spectator_chat] Error for user ${socket.data.userId}:`, error);
+    }
+  });
+
   // Duel Room Events
   socket.on("typing_status", async (data) => {
     try {

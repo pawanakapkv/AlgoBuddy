@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Terminal, Eye } from "lucide-react";
 
 import { io } from "socket.io-client";
+import SpectatorChat from "./spectator/SpectatorChat";
 
 export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) {
   const [seconds, setSeconds] = useState(0);
@@ -19,6 +20,8 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
 
   const [matchEnded, setMatchEnded] = useState(false);
   const [winnerId, setWinnerId] = useState(null);
+  
+  const [socketInstance, setSocketInstance] = useState(null);
 
   // Socket Connection for real-time status
   useEffect(() => {
@@ -34,6 +37,7 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
         username: "Spectator"
       }
     });
+    setSocketInstance(socket);
 
     socket.on("connect", () => {
       console.log("Spectator Socket Connected");
@@ -101,7 +105,7 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
           initial={{ opacity: 0, scale: 0.95, y: 10 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 10 }}
-          className="bg-white dark:bg-[#0f0f13] w-full max-w-5xl rounded-2xl shadow-2xl border border-slate-200 dark:border-neutral-800 flex flex-col overflow-hidden"
+          className="bg-white dark:bg-[#0f0f13] w-full max-w-6xl rounded-2xl shadow-2xl border border-slate-200 dark:border-neutral-800 flex flex-col overflow-hidden"
           style={{ height: "calc(100vh - 80px)" }}
         >
           {/* Header */}
@@ -204,6 +208,11 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
                   </div>
                 )}
               </div>
+            </div>
+            
+            {/* Spectator Chat Pane */}
+            <div className="w-80 flex flex-col shrink-0">
+              <SpectatorChat socket={socketInstance} matchId={matchData?.matchId} />
             </div>
           </div>
         </motion.div>
