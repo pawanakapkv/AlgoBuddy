@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Terminal, Eye } from "lucide-react";
 
 import { io } from "socket.io-client";
+import PlayerTestProgress from "./spectator/PlayerTestProgress";
 
 export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) {
   const [seconds, setSeconds] = useState(0);
@@ -14,8 +15,8 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
   const [p1Status, setP1Status] = useState("Idle");
   const [p2Status, setP2Status] = useState("Idle");
   
-  const [p1TestOutput, setP1TestOutput] = useState("");
-  const [p2TestOutput, setP2TestOutput] = useState("");
+  const [p1TestStats, setP1TestStats] = useState({ passed: 0, total: 1, failedAttempts: 0 });
+  const [p2TestStats, setP2TestStats] = useState({ passed: 0, total: 1, failedAttempts: 0 });
 
   const [matchEnded, setMatchEnded] = useState(false);
   const [winnerId, setWinnerId] = useState(null);
@@ -57,10 +58,10 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
     socket.on("opponent_test_result", (data) => {
       if (data.userId === p1.userId) {
         setP1Status("Idle");
-        setP1TestOutput(`Tests Passed: ${data.passed}/${data.total}`);
+        setP1TestStats(prev => ({ ...prev, passed: data.passed, total: data.total, failedAttempts: data.failedAttempts || prev.failedAttempts }));
       } else if (data.userId === p2.userId) {
         setP2Status("Idle");
-        setP2TestOutput(`Tests Passed: ${data.passed}/${data.total}`);
+        setP2TestStats(prev => ({ ...prev, passed: data.passed, total: data.total, failedAttempts: data.failedAttempts || prev.failedAttempts }));
       }
     });
 
@@ -158,12 +159,12 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
                   Raw code visibility is restricted to prevent unfair advantages. You are viewing live status updates.
                 </p>
 
-                {p1TestOutput && (
-                  <div className={`mt-6 p-3 rounded-xl border w-full max-w-sm ${p1TestOutput.includes("Passed") ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" : "bg-red-500/10 border-red-500/20 text-red-500"}`}>
-                    <span className="text-sm font-bold block mb-1">Latest Test Result</span>
-                    <span className="text-xs">{p1TestOutput}</span>
-                  </div>
-                )}
+                <PlayerTestProgress 
+                  passed={p1TestStats.passed} 
+                  total={p1TestStats.total} 
+                  failedAttempts={p1TestStats.failedAttempts} 
+                  status={p1Status} 
+                />
               </div>
             </div>
 
@@ -197,12 +198,12 @@ export default function SpectatorSimulatorModal({ isOpen, onClose, matchData }) 
                   Raw code visibility is restricted to prevent unfair advantages. You are viewing live status updates.
                 </p>
 
-                {p2TestOutput && (
-                  <div className={`mt-6 p-3 rounded-xl border w-full max-w-sm ${p2TestOutput.includes("Passed") ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" : "bg-red-500/10 border-red-500/20 text-red-500"}`}>
-                    <span className="text-sm font-bold block mb-1">Latest Test Result</span>
-                    <span className="text-xs">{p2TestOutput}</span>
-                  </div>
-                )}
+                <PlayerTestProgress 
+                  passed={p2TestStats.passed} 
+                  total={p2TestStats.total} 
+                  failedAttempts={p2TestStats.failedAttempts} 
+                  status={p2Status} 
+                />
               </div>
             </div>
           </div>

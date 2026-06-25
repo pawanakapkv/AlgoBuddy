@@ -16,6 +16,7 @@ export default function DuelSimulatorModal({ isOpen, onClose, opponent, currentU
   const [battleFinished, setBattleFinished] = useState(false);
   const [victoryState, setVictoryState] = useState(null); // "victory" or "defeat"
   const [isExecuting, setIsExecuting] = useState(false);
+  const [failedAttempts, setFailedAttempts] = useState(0);
   const [socket, setSocket] = useState(null);
 
   const logContainerRef = useRef(null);
@@ -261,11 +262,19 @@ export default function DuelSimulatorModal({ isOpen, onClose, opponent, currentU
       addLog(`You received execution result: ${data.message || data.status}`);
 
       if (socket && opponent?.matchId) {
+        const isSuccess = data.status === 3 || data.status === "SUCCESS";
+        let newFailedAttempts = failedAttempts;
+        if (!isSuccess) {
+          newFailedAttempts += 1;
+          setFailedAttempts(newFailedAttempts);
+        }
+
         socket.emit("test_result", {
           matchId: opponent.matchId,
           status: data.status,
-          passed: (data.status === 3 || data.status === "SUCCESS") ? 1 : 0,
-          total: 1
+          passed: isSuccess ? 1 : 0,
+          total: 1,
+          failedAttempts: newFailedAttempts
         });
 
         if (data.status === 3 || data.status === "SUCCESS") {

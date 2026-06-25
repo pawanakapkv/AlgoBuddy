@@ -591,7 +591,8 @@ io.on("connection", async (socket) => {
         userId: socket.data.userId,
         passed: data.passed,
         total: data.total,
-        status: data.status
+        status: data.status,
+        failedAttempts: data.failedAttempts || 0
       });
     } catch (error) {
       console.error(`[test_result] Error for user ${socket.data.userId}:`, error);
