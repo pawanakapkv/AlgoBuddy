@@ -76,6 +76,7 @@ export function* peekFrontGenerator(queue) {
 
 export function* peekRearGenerator(queue) {
   if (queue.length === 0) {
+    yield { phase: 'error', action: 'peek_rear', queue: [...queue], explanation: 'Cannot peek rear, queue is empty!' };
     yield { type: 'error', message: 'Queue is empty!' };
     return;
   }
